@@ -10,15 +10,25 @@ abstract final class DymuseTokens {
   /// iPhone/iPad 使用独立的移动导航（Tab、迷你播放器、全屏播放页）。
   static bool get iOS => defaultTargetPlatform == TargetPlatform.iOS;
 
+  /// Android 手机与 iPhone 共用移动导航，界面风格也沿用 iOS 的 Liquid Glass。
+  static bool get android => defaultTargetPlatform == TargetPlatform.android;
+
+  /// 手机：使用独立的移动导航，不创建桌面窗口。
+  static bool get mobile => iOS || android;
+
   /// Apple 平台共用系统字体与完整玻璃管线。
   static bool get apple => macOS || iOS;
 
-  /// Impeller(Metal) 使用完整玻璃管线；Windows/Skia 保持轻量着色器。
+  /// Liquid Glass 风格界面（Cupertino 控件、玻璃按钮）：Apple 平台与 Android。
+  static bool get liquid => apple || android;
+
+  /// Apple 的 Impeller(Metal) 使用完整玻璃管线；Windows 与 Android 用轻量着色器
+  /// （Android 上完整管线每块玻璃都做实时折射，实测明显卡顿）。
   static glass.GlassQuality get glassQuality =>
       apple ? glass.GlassQuality.premium : glass.GlassQuality.standard;
 
-  /// Apple 平台交给系统字体（SF/苹方），Windows 指定 Segoe UI。
-  static String? get fontFamily => apple ? null : 'Segoe UI';
+  /// Apple 与 Android 交给系统字体（SF/苹方、Roboto），Windows 指定 Segoe UI。
+  static String? get fontFamily => liquid ? null : 'Segoe UI';
 
   /// 默认主题色（玫红）；用户可在设置里换成 [AccentColor] 中的其他颜色。
   static const accent = Color(0xFFB83258);
@@ -40,6 +50,8 @@ abstract final class DymuseTokens {
   static const initialWindow = Size(1240, 820);
   static List<String> get fontFallback => apple
       ? const ['PingFang SC']
+      : android
+      ? const ['Noto Sans CJK SC', 'Noto Sans SC']
       : const ['Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI'];
   static const macSidebar = 232.0;
   static const heading = TextStyle(

@@ -37,7 +37,7 @@ class GlassPanel extends StatelessWidget {
         child: Padding(padding: padding, child: child),
       );
     }
-    return glass.GlassContainer(
+    final panel = glass.GlassContainer(
       quality: lightweight
           ? glass.GlassQuality.standard
           : DymuseTokens.glassQuality,
@@ -45,6 +45,15 @@ class GlassPanel extends StatelessWidget {
       useOwnLayer: true,
       padding: padding,
       child: child,
+    );
+    // Android 没有背后模糊，下面的封面和文字会原样透上来；垫一层半透明底色保证可读。
+    if (!DymuseTokens.android) return panel;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: DymuseTokens.background(context).withValues(alpha: .82),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: panel,
     );
   }
 }

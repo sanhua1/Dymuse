@@ -104,8 +104,8 @@ class PositionNotifier extends ValueNotifier<Duration> {
   Duration get value => live?.call() ?? super.value;
 }
 
-/// Apple 使用 just_audio（AVQueuePlayer）；请求头与 Windows 一致，由插件本机代理转发。
-class AppleAudioEngine with WidgetsBindingObserver implements AudioEngine {
+/// iOS、macOS 与 Android 使用 just_audio（AVQueuePlayer / ExoPlayer）；请求头与 Windows 一致，由插件本机代理转发。
+class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   final ja.AudioPlayer _player = ja.AudioPlayer();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   StreamSubscription<Duration>? _positionSubscription;
@@ -123,7 +123,7 @@ class AppleAudioEngine with WidgetsBindingObserver implements AudioEngine {
   Stream<void> get completed => _completed.stream;
   @override
   Stream<String> get errors => _errors.stream;
-  AppleAudioEngine() {
+  JustAudioEngine() {
     WidgetsBinding.instance.addObserver(this);
     _listenPosition();
     _subscriptions.addAll([

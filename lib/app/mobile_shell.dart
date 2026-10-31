@@ -13,6 +13,7 @@ import '../features/browse_page.dart';
 import '../features/catalog.dart';
 import '../features/intelligence_page.dart';
 import '../features/settings_page.dart';
+import '../platform/now_playing.dart';
 import '../playback/playback_controller.dart';
 import '../playback/phone_player.dart';
 
@@ -423,7 +424,7 @@ class _MobileShellState extends State<MobileShell>
   @override
   Widget build(BuildContext context) {
     // 顶部返回按钮取决于浏览状态（是否进入集合），因此同时监听两种模式的浏览状态。
-    return ListenableBuilder(
+    final shell = ListenableBuilder(
       listenable: Listenable.merge([playback, ...browsers.values]),
       builder: (context, _) {
         final showMini = playback.track != null;
@@ -438,7 +439,10 @@ class _MobileShellState extends State<MobileShell>
               // 而不是在顶栏下沿被纯色截断。
               Positioned.fill(
                 child: glass.GlassScrollEdgeEffect(
-                  style: glass.GlassScrollEdgeStyle.blur,
+                  // Android 的 GPU 吃不消全屏实时模糊，改用渐变遮罩。
+                  style: DymuseTokens.android
+                      ? glass.GlassScrollEdgeStyle.soft
+                      : glass.GlassScrollEdgeStyle.blur,
                   topFadeHeight:
                       MediaQuery.paddingOf(context).top + _topBar + 16,
                   fadeBottom: false,
@@ -555,6 +559,16 @@ class _MobileShellState extends State<MobileShell>
                                   cancelButtonSemanticLabel: '关闭搜索',
                                 ),
                                 quality: DymuseTokens.glassQuality,
+                                // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
+                                settings: DymuseTokens.android
+                                    ? glass.LiquidGlassSettings(
+                                        blur: 0,
+                                        thickness: 18,
+                                        glassColor: DymuseTokens.background(
+                                          context,
+                                        ).withValues(alpha: .96),
+                                      )
+                                    : null,
                               ),
                             ),
                           ],
@@ -568,6 +582,23 @@ class _MobileShellState extends State<MobileShell>
           ),
         );
       },
+    );
+    if (!DymuseTokens.android) return shell;
+    // Android 返回键：先逐级退出集合与搜索；已在根页面时把应用移到后台，
+    // 而不是结束 Activity（那会连同音乐一起停掉）。
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (canSwipeBack) {
+          swipeBack();
+        } else if (searching) {
+          toggleSearch(false);
+        } else {
+          unawaited(NowPlaying.moveToBack());
+        }
+      },
+      child: shell,
     );
   }
 

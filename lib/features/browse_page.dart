@@ -413,8 +413,8 @@ class BrowsePage extends StatelessWidget {
     listenable: browser,
     builder: (_, _) {
       // iPhone 窄屏使用更小的页边距；桌面保持原值。
-      final g = DymuseTokens.iOS ? 20.0 : 32.0;
-      final rowInset = DymuseTokens.iOS ? 10.0 : 24.0;
+      final g = DymuseTokens.mobile ? 20.0 : 32.0;
+      final rowInset = DymuseTokens.mobile ? 10.0 : 24.0;
       final discoverRoot =
           browser.mode == MusicMode.netease &&
           browser.section == 'discover' &&
@@ -435,7 +435,7 @@ class BrowsePage extends StatelessWidget {
           onExpand: onExpand,
           privateFm: true,
           header: Padding(
-            padding: EdgeInsets.fromLTRB(g, DymuseTokens.iOS ? 4 : 24, g, 8),
+            padding: EdgeInsets.fromLTRB(g, DymuseTokens.mobile ? 4 : 24, g, 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -470,7 +470,7 @@ class BrowsePage extends StatelessWidget {
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
                   g,
-                  DymuseTokens.iOS ? 4 : 24,
+                  DymuseTokens.mobile ? 4 : 24,
                   g,
                   24,
                 ),
@@ -480,7 +480,7 @@ class BrowsePage extends StatelessWidget {
                     if (showBack && browser.drilled)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
-                        child: DymuseTokens.apple
+                        child: DymuseTokens.liquid
                             ? Align(
                                 alignment: Alignment.centerLeft,
                                 child: GlassPillButton(
@@ -497,7 +497,7 @@ class BrowsePage extends StatelessWidget {
                               ),
                       ),
                     // Apple 平台的音乐模式只在模式切换处标示；Windows 保留页眉小标。
-                    if (!DymuseTokens.apple) ...[
+                    if (!DymuseTokens.liquid) ...[
                       Text(
                         browser.mode.label,
                         style: TextStyle(
@@ -550,7 +550,7 @@ class BrowsePage extends StatelessWidget {
                               }
                             }
 
-                            return DymuseTokens.apple
+                            return DymuseTokens.liquid
                                 ? Align(
                                     alignment: Alignment.centerLeft,
                                     child: GlassPillButton(
@@ -589,7 +589,7 @@ class BrowsePage extends StatelessWidget {
                         browser.collection == null)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: DymuseTokens.apple
+                        child: DymuseTokens.liquid
                             ? GlassChoiceRow<bool>(
                                 values: const [false, true],
                                 selected: browser.searchSubscriptions,
@@ -619,7 +619,7 @@ class BrowsePage extends StatelessWidget {
                         browser.collection?.kind == 'artist')
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: DymuseTokens.apple
+                        child: DymuseTokens.liquid
                             ? GlassChoiceRow<bool>(
                                 values: const [false, true],
                                 selected: browser.artistAlbums,
@@ -655,7 +655,7 @@ class BrowsePage extends StatelessWidget {
                         browser.collection == null)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: DymuseTokens.apple
+                        child: DymuseTokens.liquid
                             ? GlassChoiceRow<String>(
                                 values: const ['podcasts', 'podcastsCreated'],
                                 selected: browser.section,
@@ -681,7 +681,7 @@ class BrowsePage extends StatelessWidget {
                               ),
                       ),
                     // 现在就听页不再显示说明小字；Windows 保持原样。
-                    if (!(DymuseTokens.apple && discoverRoot))
+                    if (!(DymuseTokens.liquid && discoverRoot))
                       Text(
                         browser.query.isNotEmpty && browser.collection == null
                             ? '“${browser.query}”${(browser.searchCategory == SearchCategory.all && browser.mode == MusicMode.netease) || (browser.mode == MusicMode.bilibili && !browser.searchSubscriptions) ? '' : ' · ${page.total} 个结果'}'
@@ -699,7 +699,7 @@ class BrowsePage extends StatelessWidget {
                       const SizedBox(height: 22),
                       Row(
                         children: [
-                          if (DymuseTokens.apple)
+                          if (DymuseTokens.liquid)
                             GlassPlayButton(
                               onPressed: () =>
                                   _play(page.tracks.first, wholeList: true),
@@ -1000,7 +1000,7 @@ class BrowsePage extends StatelessWidget {
       IconData icon,
       Future<void> Function() onPressed, {
       bool iconOnly = false,
-    }) => DymuseTokens.apple
+    }) => DymuseTokens.liquid
         ? GlassPillButton(
             label: label,
             text: iconOnly ? '' : null,
@@ -1069,7 +1069,7 @@ class BrowsePage extends StatelessWidget {
       if (added) await browser.load();
     }
 
-    return DymuseTokens.apple
+    return DymuseTokens.liquid
         ? GlassPillButton(
             label: done ? '已订阅' : '订阅',
             icon: done ? CupertinoIcons.checkmark : CupertinoIcons.plus,
@@ -1334,7 +1334,7 @@ class _TrackRowState extends State<TrackRow> {
           widget.playback.track?.kind == track.kind &&
           widget.playback.mode == track.mode;
       final mac = DymuseTokens.macOS;
-      final ios = DymuseTokens.iOS;
+      final ios = DymuseTokens.mobile;
       return ValueListenableBuilder(
         valueListenable: TrackRow.selection,
         builder: (context, selectedKey, _) {

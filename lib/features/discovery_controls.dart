@@ -28,7 +28,7 @@ class DiscoveryControls extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (DymuseTokens.apple)
+        if (DymuseTokens.liquid)
           GlassChoiceRow<DiscoverSection>(
             values: DiscoverSection.values,
             selected: selected,
@@ -103,7 +103,7 @@ class _CategoryButton extends StatelessWidget {
   final VoidCallback onPressed;
   final Widget child;
   @override
-  Widget build(BuildContext context) => DymuseTokens.apple
+  Widget build(BuildContext context) => DymuseTokens.liquid
       ? GlassPillButton(
           label: label,
           text: (child as Text).data,

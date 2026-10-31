@@ -6,13 +6,13 @@
 
 **网易云音乐在各个平台上的客户端界面都他妈太丑了，所以就有了Dymuse。**
 
-按 Apple 的设计规范重新做了界面：玻璃质感的迷你播放器与导航、顺滑的返回手势和转场、跟随系统的深浅色，用起来就像Apple Music。
+按 Apple 的设计规范重新做了界面：玻璃质感的迷你播放器与导航、顺滑的返回手势和转场、跟随系统的深浅色，用起来就像Apple Music。Android 版沿用同一套界面（玻璃效果为适应 Android 的 GPU 做了简化：保留半透明与高光，去掉了背后的实时模糊）。
 
 同时也支持哔哩哔哩，把 B 站的合集和视频当作歌单来听。
 
 没有服务器，所有账号、歌单和进度只保存在你自己的设备上；需要多设备同步时，可以用自己的 WebDAV。
 
-> Every official NetEase Cloud Music client looks ugly, so this is a Liquid Glass client for iOS and macOS, with Bilibili as a second source. No server: everything stays on your device, and optional sync goes through your own WebDAV.
+> Every official NetEase Cloud Music client looks ugly, so this is a Liquid Glass client for iOS, macOS and Android, with Bilibili as a second source. No server: everything stays on your device, and optional sync goes through your own WebDAV.
 
 ## 截图
 
@@ -69,26 +69,29 @@
 
 - 两种模式的歌单、队列、播放进度互相独立
 - 可选 WebDAV 同步：红心、歌单、订阅、播放进度、设置，可选加密登录凭证；服务器上不会被覆盖或损坏
-- 迷你播放器、锁屏与控制中心、媒体键、后台播放
+- 迷你播放器、锁屏与控制中心（Android 为通知栏与锁屏控制）、媒体键与耳机键、后台播放
 - 主题色可选预设或手动取色
 - WebDav仅作同步用途，且有自定义加密密钥，不用担心WebDav服务商窃取你的平台oauth
 - 如果没有自建的WebDav，大陆环境推荐坚果云。小白可以参考这个教程：https://www.bilibili.com/video/BV1xf4y187Cy/?spm_id_from=333.337.search-card.all.click&vd_source=9d892c79bec4fcbaca00cfd4028700e4
 
 ## 当前状态
 
-iOS 与 macOS 完成度较高；Windows 、 Android 、Linux 暂未适配。项目由个人开发，很多功能只在作者自己的设备和账号上验证过，欢迎提 issue。
+iOS 与 macOS 完成度较高；Android 已可用，只在作者的一台 Sony Xperia 5 IV 上测试过，横屏与平板布局、不同厂商系统的通知表现还没有验证；Windows、Linux 暂未适配。项目由个人开发，很多功能只在作者自己的设备和账号上验证过，欢迎提 issue。
 
 ## 构建
 
-mac端需要 Flutter 3.41 或更新，以及 Xcode。
+需要 Flutter 3.41 或更新；macOS / iOS 还需要 Xcode，Android 还需要 JDK 17 与 Android SDK（platform 35 以上）。
 
 ```sh
 flutter pub get
-flutter test            # 单元测试，不联网
-flutter run -d macos    # 或连接 iPhone 后 flutter run
+flutter test                  # 单元测试，不联网
+flutter run -d macos          # 或连接 iPhone 后 flutter run
+flutter build apk --release   # Android，产物在 build/app/outputs/flutter-apk/
 ```
 
 - **签名**：工程里没有保存团队 ID。真机运行和发布需要在 Xcode 里打开 `ios/Runner.xcworkspace`、`macos/Runner.xcworkspace`，把 Team 改成你自己的，并把 Bundle ID（`app.dymuse.allinone`）换成你自己的。
+- **Android 签名**：release 暂用调试签名，方便自行侧载安装。要长期分发请在 `android/app/build.gradle.kts` 里换成你自己的发布密钥，并同样替换包名 `app.dymuse.allinone`。
+- **Android 播放通知**：第一次播放时会请求通知权限（Android 13+），不授权也能播放，只是没有通知栏控制。
 - **macOS 钥匙串**：默认的临时签名每次构建都不同，钥匙串里的登录凭证会反复弹窗。用 `DYMUSE_SIGN_IDENTITY="Apple Development: …" tool/build_mac.sh` 以固定证书构建可避免。
 - `tool/` 下是只读的联网探测脚本，不在默认测试里。
 

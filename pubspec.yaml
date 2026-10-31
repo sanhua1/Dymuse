@@ -1,5 +1,5 @@
 name: dymuse
-description: Dymuse：网易云音乐与哔哩哔哩的 iOS / macOS 播放器，所有数据只保存在本机。
+description: Dymuse：网易云音乐与哔哩哔哩的 iOS / macOS / Android 播放器，所有数据只保存在本机。
 publish_to: none
 version: 0.1.0+1
 environment:

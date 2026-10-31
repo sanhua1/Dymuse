@@ -214,7 +214,7 @@ class SearchScopes extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 12),
-    child: DymuseTokens.apple
+    child: DymuseTokens.liquid
         ? GlassChoiceRow<SearchCategory>(
             values: SearchCategory.values,
             selected: selected,
@@ -286,7 +286,7 @@ class PlaylistSubscriptionButton extends StatelessWidget {
                       );
                     }
                   };
-            return DymuseTokens.apple
+            return DymuseTokens.liquid
                 ? Align(
                     alignment: Alignment.centerLeft,
                     child: GlassPillButton(

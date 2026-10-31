@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as glass;
 import 'package:window_manager/window_manager.dart';
@@ -154,7 +155,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
           builder: (context, child) {
             final media = MediaQuery.of(context);
             final effective = CupertinoTheme.brightnessOf(context);
-            return MediaQuery(
+            final app = MediaQuery(
               data: media.copyWith(
                 disableAnimations:
                     media.disableAnimations || appearance.reduceMotion,
@@ -163,11 +164,13 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                 theme: glass.GlassThemeData.simple(
                   quality: DymuseTokens.glassQuality,
                   brightness: effective,
-                  blur: 12,
+                  // Android 上任何背后模糊都要每帧抓取并重绘背景，实测使
+                  // 120Hz 下约一半的帧超时；关掉后玻璃只保留底色、描边与高光。
+                  blur: DymuseTokens.android ? 0 : 12,
                   thickness: 18,
                 ),
                 // Apple 平台由系统负责缩放和边框；macOS 背景留给原生侧栏材质。
-                child: DymuseTokens.apple
+                child: DymuseTokens.liquid
                     ? child!
                     : DragToResizeArea(
                         resizeEdgeSize: 5,
@@ -183,6 +186,23 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                       ),
               ),
             );
+            // Android 系统栏透明、图标随主题明暗，内容延伸到状态栏与手势条下方。
+            if (!DymuseTokens.android) return app;
+            final dark = effective == Brightness.dark;
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: const Color(0x00000000),
+                systemNavigationBarColor: const Color(0x00000000),
+                systemNavigationBarContrastEnforced: false,
+                statusBarIconBrightness: dark
+                    ? Brightness.light
+                    : Brightness.dark,
+                systemNavigationBarIconBrightness: dark
+                    ? Brightness.light
+                    : Brightness.dark,
+              ),
+              child: app,
+            );
           },
           home: Builder(
             builder: (context) {
@@ -192,7 +212,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
               if (widget.session.user == null ||
                   widget.session.mustChangePassword ||
                   widget.session.firstLogin) {
-                if (DymuseTokens.iOS) {
+                if (DymuseTokens.mobile) {
                   // 外壳不是 Scaffold，不会随键盘缩小；底部垫上键盘高度，
                   // 登录表单才会在输入法弹出时上移，焦点输入框保持可见。
                   return ColoredBox(
@@ -231,7 +251,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                   ),
                 );
               }
-              if (DymuseTokens.iOS) {
+              if (DymuseTokens.mobile) {
                 // Cupertino 弹层（播放页、设置）出现时背景页会被缩放；GlassPage 把
                 // “正在被推后”告知玻璃层，冻结其采样坐标，否则玻璃与文字会错位。
                 return glass.GlassPage(

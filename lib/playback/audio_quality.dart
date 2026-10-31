@@ -15,7 +15,7 @@ enum AudioQuality {
   /// 没有设置过时的默认音质：手机省流量，桌面尽量用最高音质。
   /// 音质是每台设备自己的设置，不通过 WebDAV 同步。
   static AudioQuality get fallback =>
-      DymuseTokens.iOS ? AudioQuality.standard : AudioQuality.hires;
+      DymuseTokens.mobile ? AudioQuality.standard : AudioQuality.hires;
 
   static AudioQuality fromName(String? name) => AudioQuality.values.firstWhere(
     (quality) => quality.name == name,

@@ -349,7 +349,7 @@ class _PlaylistPickerState extends State<_PlaylistPicker> {
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                DymuseTokens.apple
+                DymuseTokens.liquid
                     ? widget.track.title
                     : '${widget.track.mode.label} · ${widget.track.title}',
                 maxLines: 2,

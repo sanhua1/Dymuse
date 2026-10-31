@@ -468,7 +468,7 @@ class _FullPlayerState extends State<FullPlayer> {
                   ),
                   Expanded(
                     child: Text(
-                      DymuseTokens.apple ? '' : controller.mode.label,
+                      DymuseTokens.liquid ? '' : controller.mode.label,
                       textAlign: TextAlign.center,
                       style: DymuseTokens.caption.copyWith(
                         color: DymuseTokens.secondary(context),
