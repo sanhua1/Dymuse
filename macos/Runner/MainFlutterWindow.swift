@@ -39,6 +39,12 @@ class MainFlutterWindow: NSWindow {
         }
         self?.layoutWindowButtons()
         result(nil)
+      case "enterMenuBar":
+        (NSApp.delegate as? AppDelegate)?.enterMenuBar()
+        result(nil)
+      case "leaveMenuBar":
+        (NSApp.delegate as? AppDelegate)?.showMainWindow()
+        result(nil)
       case "layoutWindowButtons":
         self?.layoutWindowButtons()
         result(nil)

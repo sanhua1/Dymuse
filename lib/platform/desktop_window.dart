@@ -10,6 +10,9 @@ class DesktopWindow extends ChangeNotifier with WindowListener {
   bool focused = true, fullScreen = false, maximized = false;
   bool _closing = false;
   Future<void> Function()? beforeClose;
+
+  /// macOS：关闭窗口后隐藏程序坞图标，只在菜单栏保留入口（设置里开关）。
+  bool menuBarMode = false;
   Future<void> initialize() async {
     await windowManager.ensureInitialized();
     windowManager.addListener(this);
@@ -75,7 +78,13 @@ class DesktopWindow extends ChangeNotifier with WindowListener {
 
   Future<void> close() async {
     // macOS 与“音乐”一致：关闭窗口只隐藏，播放继续；退出应用时才保存并结束。
-    if (DymuseTokens.macOS) return windowManager.hide();
+    if (DymuseTokens.macOS) {
+      await windowManager.hide();
+      if (menuBarMode) {
+        await _native.invokeMethod('enterMenuBar').catchError((_) {});
+      }
+      return;
+    }
     if (_closing) return;
     _closing = true;
     try {

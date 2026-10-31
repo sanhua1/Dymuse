@@ -321,6 +321,7 @@ class _MacShellState extends State<MacShell> {
           session: widget.session,
           appearance: widget.appearance,
           playback: playback,
+          window: widget.window,
         )
       : mode == MusicMode.netease && browser.section == 'intelligence'
       ? IntelligencePage(
@@ -661,106 +662,121 @@ class _MacSidebar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
                 const _SidebarHeader('音乐模式'),
-                _SidebarItem(
-                  label: '网易云音乐',
-                  icon: CupertinoIcons.cloud,
-                  selected: netease,
-                  onPressed: switching ? null : () => onMode(MusicMode.netease),
-                ),
-                _SidebarItem(
-                  label: '哔哩哔哩',
-                  icon: CupertinoIcons.play_rectangle,
-                  selected: !netease,
-                  onPressed: switching
-                      ? null
-                      : () => onMode(MusicMode.bilibili),
+                _SidebarGroup(
+                  children: [
+                    _SidebarItem(
+                      label: '网易云音乐',
+                      icon: CupertinoIcons.cloud,
+                      selected: netease,
+                      onPressed: switching
+                          ? null
+                          : () => onMode(MusicMode.netease),
+                    ),
+                    _SidebarItem(
+                      label: '哔哩哔哩',
+                      icon: CupertinoIcons.play_rectangle,
+                      selected: !netease,
+                      onPressed: switching
+                          ? null
+                          : () => onMode(MusicMode.bilibili),
+                    ),
+                  ],
                 ),
                 // 所有内容入口收在“资料库”一组里；模式名只在上方“音乐模式”处标示。
                 const _SidebarHeader('资料库'),
-                if (netease) ...[
-                  _SidebarItem(
-                    label: '心动模式',
-                    icon: CupertinoIcons.heart_circle,
-                    selected: at('intelligence'),
-                    onPressed: () => onNavigate('intelligence'),
-                  ),
-                  _SidebarItem(
-                    label: '现在就听',
-                    icon: CupertinoIcons.play_circle,
-                    selected: at('discover'),
-                    onPressed: () => onNavigate('discover'),
-                  ),
-                  _SidebarItem(
-                    label: '每日推荐',
-                    icon: CupertinoIcons.calendar_today,
-                    selected: at('songs'),
-                    onPressed: () => onNavigate('songs'),
-                  ),
-                  _SidebarItem(
-                    label: '我喜欢的音乐',
-                    icon: CupertinoIcons.heart,
-                    selected: at('favorites'),
-                    onPressed: () => onNavigate('favorites'),
-                  ),
-                  _SidebarItem(
-                    label: '播客',
-                    icon: CupertinoIcons.mic,
-                    selected:
-                        !settings && browser.section.startsWith('podcasts'),
-                    onPressed: () => onNavigate('podcasts'),
-                  ),
-                ] else ...[
-                  _SidebarItem(
-                    label: '我的订阅',
-                    icon: CupertinoIcons.rectangle_stack,
-                    selected: at('subscriptions'),
-                    onPressed: () => onNavigate('subscriptions'),
-                  ),
-                  _SidebarItem(
-                    label: '我喜欢的音乐',
-                    icon: CupertinoIcons.heart,
-                    selected: at('favorites'),
-                    onPressed: () => onNavigate('favorites'),
-                  ),
-                  _SidebarItem(
-                    label: '歌单',
-                    icon: CupertinoIcons.music_note_list,
-                    selected: at('playlists'),
-                    onPressed: () => onNavigate('playlists'),
-                  ),
-                  _SidebarItem(
-                    label: '资料库',
-                    icon: CupertinoIcons.collections,
-                    selected: at('library'),
-                    onPressed: () => onNavigate('library'),
-                  ),
-                ],
-                if (netease)
-                  _SidebarItem(
-                    label: '我的歌单',
-                    icon: CupertinoIcons.music_note_list,
-                    selected: at('playlists'),
-                    onPressed: () => onNavigate('playlists'),
-                  ),
-                _SidebarItem(
-                  label: '搜索结果',
-                  icon: CupertinoIcons.search,
-                  selected: at('search'),
-                  onPressed: () {
-                    onNavigate('search');
-                    searchFocus.requestFocus();
-                  },
+                _SidebarGroup(
+                  key: ValueKey(netease),
+                  children: [
+                    if (netease) ...[
+                      _SidebarItem(
+                        label: '心动模式',
+                        icon: CupertinoIcons.heart_circle,
+                        selected: at('intelligence'),
+                        onPressed: () => onNavigate('intelligence'),
+                      ),
+                      _SidebarItem(
+                        label: '现在就听',
+                        icon: CupertinoIcons.play_circle,
+                        selected: at('discover'),
+                        onPressed: () => onNavigate('discover'),
+                      ),
+                      _SidebarItem(
+                        label: '每日推荐',
+                        icon: CupertinoIcons.calendar_today,
+                        selected: at('songs'),
+                        onPressed: () => onNavigate('songs'),
+                      ),
+                      _SidebarItem(
+                        label: '我喜欢的音乐',
+                        icon: CupertinoIcons.heart,
+                        selected: at('favorites'),
+                        onPressed: () => onNavigate('favorites'),
+                      ),
+                      _SidebarItem(
+                        label: '播客',
+                        icon: CupertinoIcons.mic,
+                        selected:
+                            !settings && browser.section.startsWith('podcasts'),
+                        onPressed: () => onNavigate('podcasts'),
+                      ),
+                    ] else ...[
+                      _SidebarItem(
+                        label: '我的订阅',
+                        icon: CupertinoIcons.rectangle_stack,
+                        selected: at('subscriptions'),
+                        onPressed: () => onNavigate('subscriptions'),
+                      ),
+                      _SidebarItem(
+                        label: '我喜欢的音乐',
+                        icon: CupertinoIcons.heart,
+                        selected: at('favorites'),
+                        onPressed: () => onNavigate('favorites'),
+                      ),
+                      _SidebarItem(
+                        label: '歌单',
+                        icon: CupertinoIcons.music_note_list,
+                        selected: at('playlists'),
+                        onPressed: () => onNavigate('playlists'),
+                      ),
+                      _SidebarItem(
+                        label: '资料库',
+                        icon: CupertinoIcons.collections,
+                        selected: at('library'),
+                        onPressed: () => onNavigate('library'),
+                      ),
+                    ],
+                    if (netease)
+                      _SidebarItem(
+                        label: '我的歌单',
+                        icon: CupertinoIcons.music_note_list,
+                        selected: at('playlists'),
+                        onPressed: () => onNavigate('playlists'),
+                      ),
+                    _SidebarItem(
+                      label: '搜索结果',
+                      icon: CupertinoIcons.search,
+                      selected: at('search'),
+                      onPressed: () {
+                        onNavigate('search');
+                        searchFocus.requestFocus();
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 4, 8, 10),
-            child: _SidebarItem(
-              label: '账号与设置',
-              icon: CupertinoIcons.gear_alt,
-              selected: settings,
-              onPressed: onSettings,
+            child: _SidebarGroup(
+              children: [
+                _SidebarItem(
+                  label: '账号与设置',
+                  icon: CupertinoIcons.gear_alt,
+                  selected: settings,
+                  onPressed: onSettings,
+                ),
+              ],
             ),
           ),
         ],
@@ -789,6 +805,62 @@ class _SidebarHeader extends StatelessWidget {
   );
 }
 
+/// 侧栏同一组内共用一块高亮底：切换选项时高亮平滑滑到新位置（与 Finder、音乐一致），
+/// 选中项离开本组（或回到本组）时高亮淡出（淡入）而不滑动。
+class _SidebarGroup extends StatefulWidget {
+  const _SidebarGroup({super.key, required this.children});
+  final List<_SidebarItem> children;
+  @override
+  State<_SidebarGroup> createState() => _SidebarGroupState();
+}
+
+class _SidebarGroupState extends State<_SidebarGroup> {
+  static const _pitch = 34.0; // 行高 32 + 间距 2
+  int _shown = -1; // 上一次高亮所在行；-1 表示当时没有高亮
+  int _last = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final index = widget.children.indexWhere((item) => item.selected);
+    final slide = _shown >= 0 && index >= 0;
+    if (index >= 0) _last = index;
+    _shown = index;
+    final dark = DymuseTokens.dark(context);
+    final reduce = MediaQuery.disableAnimationsOf(context);
+    final move = reduce || !slide
+        ? Duration.zero
+        : const Duration(milliseconds: 320);
+    return Stack(
+      children: [
+        AnimatedPositioned(
+          duration: move,
+          curve: Curves.easeOutCubic,
+          left: 0,
+          right: 0,
+          top: _last * _pitch,
+          height: 32,
+          child: AnimatedOpacity(
+            duration: reduce
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            opacity: index >= 0 ? 1 : 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: dark ? const Color(0x1FFFFFFF) : const Color(0x14000000),
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: widget.children,
+        ),
+      ],
+    );
+  }
+}
+
 /// macOS 侧栏行：未选中为正文色线条图标；选中为中性圆角底、强调色图标与文字。
 class _SidebarItem extends StatefulWidget {
   const _SidebarItem({
@@ -809,7 +881,6 @@ class _SidebarItemState extends State<_SidebarItem> {
   bool focus = false;
   @override
   Widget build(BuildContext context) {
-    final dark = DymuseTokens.dark(context);
     final tint = DymuseTokens.tint(context);
     final foreground = widget.onPressed == null
         ? DymuseTokens.secondary(context)
@@ -842,28 +913,29 @@ class _SidebarItemState extends State<_SidebarItem> {
             margin: const EdgeInsets.only(bottom: 2),
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
-              color: widget.selected
-                  ? (dark ? const Color(0x1FFFFFFF) : const Color(0x14000000))
-                  : const Color(0x00000000),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: focus ? tint : const Color(0x00000000),
                 width: 2,
               ),
             ),
-            child: Row(
-              children: [
-                Icon(widget.icon, size: 17, color: foreground),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    widget.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: foreground),
+            child: TweenAnimationBuilder<Color?>(
+              tween: ColorTween(end: foreground),
+              duration: const Duration(milliseconds: 220),
+              builder: (context, color, _) => Row(
+                children: [
+                  Icon(widget.icon, size: 17, color: color),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: color),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

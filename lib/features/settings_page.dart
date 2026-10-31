@@ -6,6 +6,7 @@ import '../core/session.dart';
 import '../design_system/components.dart';
 import '../design_system/tokens.dart';
 import '../playback/audio_quality.dart';
+import '../platform/desktop_window.dart';
 import '../playback/playback_controller.dart';
 import 'accent_picker.dart';
 import 'bilibili_account.dart';
@@ -18,7 +19,9 @@ class SettingsPage extends StatefulWidget {
     required this.session,
     required this.appearance,
     required this.playback,
+    this.window,
   });
+  final DesktopWindow? window;
   final Session session;
   final Appearance appearance;
   final PlaybackController playback;
@@ -171,6 +174,31 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 18),
             _setting('主题色', _AccentPicker(appearance: appearance)),
           ]),
+          if (DymuseTokens.macOS && widget.window != null)
+            _section(
+              '窗口',
+              [
+                _setting(
+                  '关闭窗口后只在菜单栏显示',
+                  CupertinoSwitch(
+                    value: widget.window!.menuBarMode,
+                    onChanged: (value) {
+                      widget.window!.menuBarMode = value;
+                      unawaited(
+                        widget.session.preferences.setBool(
+                          'menuBarMode',
+                          value,
+                        ),
+                      );
+                      setState(() {});
+                    },
+                  ),
+                ),
+              ],
+              info:
+                  '开启后，按 ⌘W 或点红色按钮关闭窗口时，程序坞图标会隐藏，只在屏幕顶部菜单栏留下一个图标，音乐继续播放。'
+                  '点菜单栏图标重新打开窗口；右键图标可选择退出。',
+            ),
           _section(
             '音质',
             [
@@ -283,23 +311,11 @@ class _SettingsPageState extends State<SettingsPage> {
       mb >= 1024 ? '${(mb / 1024).toStringAsFixed(0)} GB' : '$mb MB';
 
   Future<void> chooseLimit(CacheGroup group) async {
-    final picked = await showCupertinoModalPopup<int>(
-      context: context,
-      builder: (sheet) => CupertinoActionSheet(
-        title: Text('${group.label}上限'),
-        actions: [
-          for (final mb in MediaCache.limitChoices)
-            CupertinoActionSheetAction(
-              isDefaultAction: mb == cache!.limitMb(group),
-              onPressed: () => Navigator.pop(sheet, mb),
-              child: Text(limitLabel(mb)),
-            ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.pop(sheet),
-          child: const Text('取消'),
-        ),
-      ),
+    final picked = await showChoiceSheet<int>(
+      context,
+      title: '${group.label}上限',
+      choices: [for (final mb in MediaCache.limitChoices) (limitLabel(mb), mb)],
+      current: cache!.limitMb(group),
     );
     if (picked == null) return;
     await cache!.setLimit(group, picked);

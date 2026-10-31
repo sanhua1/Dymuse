@@ -36,6 +36,8 @@ Future<void> main() async {
   final preferences = await SharedPreferences.getInstance();
   await LiquidGlassWidgets.initialize(enablePerformanceMonitor: false);
   final api = ApiClient(), window = DesktopWindow();
+  window.menuBarMode =
+      Platform.isMacOS && (preferences.getBool('menuBarMode') ?? false);
   api.cache = await MediaCache.open(preferences, audioEnabled: justAudio);
   if (api.cache != null) {
     for (final group in CacheGroup.values) {

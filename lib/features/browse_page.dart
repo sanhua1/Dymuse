@@ -1365,7 +1365,9 @@ class _TrackRowState extends State<TrackRow> {
                     _loadFavoriteState();
                     _menuController.open();
                   },
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 8,
@@ -1377,6 +1379,10 @@ class _TrackRowState extends State<TrackRow> {
                                 ? (DymuseTokens.dark(context)
                                       ? const Color(0x24FFFFFF)
                                       : const Color(0x14000000))
+                                : hover
+                                ? (DymuseTokens.dark(context)
+                                      ? const Color(0x14FFFFFF)
+                                      : const Color(0x0D000000))
                                 : null
                           : active
                           ? DymuseTokens.tint(context).withValues(alpha: .08)
@@ -1387,6 +1393,10 @@ class _TrackRowState extends State<TrackRow> {
                       border: Border.all(
                         color: focus
                             ? DymuseTokens.tint(context)
+                            : mac && hover
+                            ? (DymuseTokens.dark(context)
+                                  ? const Color(0x1FFFFFFF)
+                                  : const Color(0x14000000))
                             : const Color(0x00000000),
                       ),
                     ),
@@ -1395,41 +1405,72 @@ class _TrackRowState extends State<TrackRow> {
                         if (!ios) ...[
                           SizedBox(
                             width: 36,
-                            child: mac && active
-                                ? ValueListenableBuilder(
-                                    valueListenable:
-                                        widget.playback.engine.playing,
-                                    builder: (context, playing, _) => hover
-                                        ? ActionButton(
-                                            label: playing ? '暂停' : '播放',
-                                            icon: playing
-                                                ? CupertinoIcons.pause_fill
-                                                : CupertinoIcons.play_fill,
-                                            compact: true,
-                                            onPressed: widget.playback.toggle,
-                                          )
-                                        : Icon(
-                                            playing
-                                                ? CupertinoIcons.speaker_2_fill
-                                                : CupertinoIcons.speaker_fill,
-                                            size: 15,
-                                            color: DymuseTokens.tint(context),
-                                          ),
-                                  )
-                                : hover || active
-                                ? ActionButton(
-                                    label: '播放 ${track.title}',
-                                    icon: CupertinoIcons.play_fill,
-                                    compact: true,
-                                    onPressed: widget.onPlay,
-                                  )
-                                : Text(
-                                    '${widget.index + 1}',
-                                    textAlign: TextAlign.center,
-                                    style: DymuseTokens.caption.copyWith(
-                                      color: DymuseTokens.secondary(context),
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: Tween(
+                                        begin: .7,
+                                        end: 1.0,
+                                      ).animate(animation),
+                                      child: child,
                                     ),
                                   ),
+                              child: KeyedSubtree(
+                                key: ValueKey(hover || active),
+                                child: mac && active
+                                    ? ValueListenableBuilder(
+                                        valueListenable:
+                                            widget.playback.engine.playing,
+                                        builder: (context, playing, _) => hover
+                                            ? GlassSquareButton(
+                                                label: playing ? '暂停' : '播放',
+                                                icon: playing
+                                                    ? CupertinoIcons.pause_fill
+                                                    : CupertinoIcons.play_fill,
+                                                onPressed:
+                                                    widget.playback.toggle,
+                                              )
+                                            : Icon(
+                                                playing
+                                                    ? CupertinoIcons
+                                                          .speaker_2_fill
+                                                    : CupertinoIcons
+                                                          .speaker_fill,
+                                                size: 15,
+                                                color: DymuseTokens.tint(
+                                                  context,
+                                                ),
+                                              ),
+                                      )
+                                    : hover || active
+                                    ? mac
+                                          ? GlassSquareButton(
+                                              label: '播放 ${track.title}',
+                                              icon: CupertinoIcons.play_fill,
+                                              onPressed: widget.onPlay,
+                                            )
+                                          : ActionButton(
+                                              label: '播放 ${track.title}',
+                                              icon: CupertinoIcons.play_fill,
+                                              compact: true,
+                                              onPressed: widget.onPlay,
+                                            )
+                                    : Text(
+                                        '${widget.index + 1}',
+                                        textAlign: TextAlign.center,
+                                        style: DymuseTokens.caption.copyWith(
+                                          color: DymuseTokens.secondary(
+                                            context,
+                                          ),
+                                        ),
+                                      ),
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 8),
                         ],
@@ -1633,23 +1674,14 @@ class _TrackRowState extends State<TrackRow> {
       return;
     }
     if (!context.mounted) return;
-    final picked = await showCupertinoModalPopup<Json>(
-      context: context,
-      builder: (sheet) => CupertinoActionSheet(
-        title: const Text('跳转到'),
-        message: sources.isEmpty ? const Text('这个视频没有可以跳转的来源。') : null,
-        actions: [
-          for (final item in sources)
-            CupertinoActionSheetAction(
-              onPressed: () => Navigator.pop(sheet, item),
-              child: Text('${item['typeLabel']} · ${item['label']}'),
-            ),
-        ],
-        cancelButton: CupertinoActionSheetAction(
-          onPressed: () => Navigator.pop(sheet),
-          child: const Text('取消'),
-        ),
-      ),
+    final picked = await showChoiceSheet<Json>(
+      context,
+      title: '跳转到',
+      message: sources.isEmpty ? '这个视频没有可以跳转的来源。' : null,
+      choices: [
+        for (final item in sources)
+          ('${item['typeLabel']} · ${item['label']}', item),
+      ],
     );
     if (picked == null) return;
     widget.onOpenCollection?.call(

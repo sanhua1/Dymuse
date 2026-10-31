@@ -451,6 +451,43 @@ class GlassPillButton extends StatelessWidget {
   }
 }
 
+/// 列表行里悬停时的播放/暂停图标，32×32 点击区域，无自身底板。
+class GlassSquareButton extends StatelessWidget {
+  const GlassSquareButton({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: label,
+    excludeSemantics: true,
+    onTap: onPressed,
+    child: MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onPressed,
+        child: Center(
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            // 行本身已有悬停玻璃底，这里只留图标，避免内外两层玻璃。
+            child: Center(
+              child: Icon(icon, size: 16, color: DymuseTokens.ink(context)),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
 /// 页面主“播放”按钮的 Liquid Glass 版本（对应 Apple Music 的“播放”按钮）。
 class GlassPlayButton extends StatelessWidget {
   const GlassPlayButton({super.key, required this.onPressed});
@@ -614,18 +651,29 @@ class _GlassPopupMenuState extends State<GlassPopupMenu> {
   @override
   Widget build(BuildContext context) => glass.GlassMenu(
     controller: _controller,
-    menuWidth: widget.width,
+    // 手机沿用触控尺寸；桌面按 macOS 菜单的 13pt 字号与紧凑行高。
+    menuWidth: DymuseTokens.mobile ? widget.width : widget.width * .85,
     autoAdjustToScreen: true,
-    menuPadding: const EdgeInsets.all(12),
+    menuPadding: EdgeInsets.all(DymuseTokens.mobile ? 12 : 6),
     quality: DymuseTokens.glassQuality,
     items: [
       for (final entry in widget.entries)
         glass.GlassMenuItem(
           title: entry.label,
           isDestructive: entry.destructive,
-          icon: entry.icon == null ? null : Icon(entry.icon, size: 20),
+          height: DymuseTokens.mobile ? 44 : 36,
+          iconSize: DymuseTokens.mobile ? 20 : 15,
+          titleStyle: DymuseTokens.mobile
+              ? null
+              : const TextStyle(fontSize: 13, fontWeight: FontWeight.w400),
+          icon: entry.icon == null
+              ? null
+              : Icon(entry.icon, size: DymuseTokens.mobile ? 20 : 15),
           trailing: entry.checked
-              ? const Icon(CupertinoIcons.checkmark, size: 16)
+              ? Icon(
+                  CupertinoIcons.checkmark,
+                  size: DymuseTokens.mobile ? 16 : 13,
+                )
               : null,
           onTap: entry.onTap,
         ),
@@ -664,6 +712,113 @@ Future<T?> showFormSheet<T>(
           child: wide
               ? ClipRRect(borderRadius: BorderRadius.circular(18), child: form)
               : form,
+        ),
+      ),
+    );
+  },
+);
+
+/// 选择表：手机用系统动作表（整宽大字）；桌面窗口里是一张紧凑的居中小卡片，
+/// 与其它界面的 13～14pt 字号一致。选择返回对应值，取消返回 null。
+Future<T?> showChoiceSheet<T>(
+  BuildContext context, {
+  required String title,
+  String? message,
+  required List<(String, T)> choices,
+  T? current,
+}) => showCupertinoModalPopup<T>(
+  context: context,
+  builder: (sheet) {
+    if (DymuseTokens.mobile) {
+      return CupertinoActionSheet(
+        title: Text(title),
+        message: message == null ? null : Text(message),
+        actions: [
+          for (final (label, value) in choices)
+            CupertinoActionSheetAction(
+              isDefaultAction: value == current,
+              onPressed: () => Navigator.pop(sheet, value),
+              child: Text(label),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(sheet),
+          child: const Text('取消'),
+        ),
+      );
+    }
+    Widget row(String label, VoidCallback onTap, {bool selected = false}) =>
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              minimumSize: const Size.fromHeight(36),
+              borderRadius: BorderRadius.circular(DymuseTokens.radius.control),
+              color: DymuseTokens.ink(sheet).withValues(alpha: .1),
+              pressedOpacity: .6,
+              onPressed: onTap,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: selected
+                      ? DymuseTokens.tint(sheet)
+                      : DymuseTokens.ink(sheet),
+                ),
+              ),
+            ),
+          ),
+        );
+    return Center(
+      child: Container(
+        width: 320,
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        decoration: BoxDecoration(
+          color: DymuseTokens.surface(sheet),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: DymuseTokens.line(sheet)),
+        ),
+        child: DefaultTextStyle(
+          style: const TextStyle(fontSize: 13),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 0, 0, 2),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: DymuseTokens.secondary(sheet),
+                  ),
+                ),
+              ),
+              if (message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: DymuseTokens.secondary(sheet),
+                    ),
+                  ),
+                ),
+              for (final (label, value) in choices)
+                row(
+                  label,
+                  () => Navigator.pop(sheet, value),
+                  selected: value == current,
+                ),
+              row('取消', () => Navigator.pop(sheet)),
+            ],
+          ),
         ),
       ),
     );
