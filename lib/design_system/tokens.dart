@@ -1,0 +1,191 @@
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as glass;
+
+/// 语义 Token；各平台使用系统字体，不分发 Apple 字体。
+abstract final class DymuseTokens {
+  /// macOS 保留原生标题栏、窗口按钮和菜单；判断与测试宿主无关。
+  static bool get macOS => defaultTargetPlatform == TargetPlatform.macOS;
+
+  /// iPhone/iPad 使用独立的移动导航（Tab、迷你播放器、全屏播放页）。
+  static bool get iOS => defaultTargetPlatform == TargetPlatform.iOS;
+
+  /// Apple 平台共用系统字体与完整玻璃管线。
+  static bool get apple => macOS || iOS;
+
+  /// Impeller(Metal) 使用完整玻璃管线；Windows/Skia 保持轻量着色器。
+  static glass.GlassQuality get glassQuality =>
+      apple ? glass.GlassQuality.premium : glass.GlassQuality.standard;
+
+  /// Apple 平台交给系统字体（SF/苹方），Windows 指定 Segoe UI。
+  static String? get fontFamily => apple ? null : 'Segoe UI';
+
+  /// 默认主题色（玫红）；用户可在设置里换成 [AccentColor] 中的其他颜色。
+  static const accent = Color(0xFFB83258);
+  static const accentDark = Color(0xFFFF91AE);
+  static const spacing = (
+    xs: 4.0,
+    sm: 8.0,
+    md: 12.0,
+    lg: 16.0,
+    xl: 24.0,
+    page: 32.0,
+  );
+  static const radius = (control: 12.0, panel: 22.0, artwork: 10.0);
+  static const motion = Duration(milliseconds: 220);
+  static const sidebar = 220.0;
+  static const wideBreakpoint = 1080.0;
+  static const compactBreakpoint = 860.0;
+  static const minWindow = Size(720, 600);
+  static const initialWindow = Size(1240, 820);
+  static List<String> get fontFallback => apple
+      ? const ['PingFang SC']
+      : const ['Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI'];
+  static const macSidebar = 232.0;
+  static const heading = TextStyle(
+    fontSize: 30,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -.8,
+  );
+  static const title = TextStyle(
+    fontSize: 20,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -.4,
+  );
+  static const body = TextStyle(fontSize: 14, height: 1.4);
+  static const caption = TextStyle(fontSize: 12, height: 1.35);
+
+  static bool dark(BuildContext context) =>
+      CupertinoTheme.brightnessOf(context) == Brightness.dark;
+  static Color ink(BuildContext context) =>
+      dark(context) ? const Color(0xFFF3F1F5) : const Color(0xFF26242B);
+  static Color secondary(BuildContext context) =>
+      dark(context) ? const Color(0xFFB0ABB7) : const Color(0xFF6C6773);
+  static Color background(BuildContext context) =>
+      dark(context) ? const Color(0xFF18171B) : const Color(0xFFFBFAFC);
+  static Color surface(BuildContext context) =>
+      dark(context) ? const Color(0xFF26242B) : const Color(0xFFF1EFF4);
+  static Color line(BuildContext context) =>
+      dark(context) ? const Color(0xFF3B3742) : const Color(0xFFE4E1E8);
+
+  /// 当前主题色。读 CupertinoTheme 的亮暗已建立依赖，换色时 CupertinoApp 的主题随之
+  /// 变化，调用处会重建，所以这里读设置不再单独登记依赖。
+  static Color tint(BuildContext context) {
+    final appearance = context
+        .getInheritedWidgetOfExactType<AppearanceScope>()
+        ?.notifier;
+    if (appearance == null) {
+      return dark(context) ? AccentColor.rose.dark : AccentColor.rose.light;
+    }
+    return dark(context) ? appearance.accentDark : appearance.accentLight;
+  }
+}
+
+/// 可选主题色：浅色模式用较深的颜色保证文字对比度，深色模式用较亮的颜色。
+enum AccentColor {
+  rose('玫红', DymuseTokens.accent, DymuseTokens.accentDark),
+  red('红色', Color(0xFFC62828), Color(0xFFFF8A80)),
+  orange('橙色', Color(0xFFB85A0F), Color(0xFFFFB067)),
+  green('绿色', Color(0xFF237A3B), Color(0xFF6FD98C)),
+  teal('青色', Color(0xFF0F7480), Color(0xFF5ED3DE)),
+  blue('蓝色', Color(0xFF1F63C6), Color(0xFF7AB4FF)),
+  indigo('靛蓝', Color(0xFF4A44C2), Color(0xFFA29DFF)),
+  purple('紫色', Color(0xFF8136B8), Color(0xFFD29BFF));
+
+  const AccentColor(this.label, this.light, this.dark);
+  final String label;
+  final Color light, dark;
+}
+
+/// 可访问性选项独立于高对比度，不能依赖包把它们混作一项。
+class Appearance extends ChangeNotifier {
+  Appearance({
+    this.brightness,
+    this.reduceTransparency = false,
+    this.reduceMotion = false,
+    this.accent = AccentColor.rose,
+  });
+  Brightness? brightness;
+  bool reduceTransparency, reduceMotion;
+  AccentColor accent;
+
+  /// 用户手动选的主题色；不为空时优先于 [accent]。
+  Color? custom;
+
+  /// 浅色模式要用较深的颜色保证文字对比度，深色模式用较亮的颜色；
+  /// 手动选的颜色在不改色相的前提下把明度调进合适范围。
+  Color get accentLight =>
+      custom == null ? accent.light : _tone(custom!, min: .26, max: .44);
+  Color get accentDark =>
+      custom == null ? accent.dark : _tone(custom!, min: .66, max: .8);
+
+  static Color _tone(Color color, {required double min, required double max}) {
+    final hsl = HSLColor.fromColor(color);
+    return hsl
+        .withLightness(hsl.lightness.clamp(min, max))
+        .withSaturation(hsl.saturation.clamp(.3, .95))
+        .toColor();
+  }
+
+  /// 保存与同步用的文字：预设写名字，手动颜色写 #RRGGBB。
+  String get accentValue => custom == null
+      ? accent.name
+      : '#${(custom!.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+  /// 读回 [accentValue]；认不出时返回 null。
+  static ({AccentColor? preset, Color? custom})? parseAccent(String? text) {
+    if (text == null || text.isEmpty) return null;
+    final hex = RegExp(r'^#([0-9A-Fa-f]{6})$').firstMatch(text);
+    if (hex != null) {
+      return (
+        preset: null,
+        custom: Color(0xFF000000 | int.parse(hex.group(1)!, radix: 16)),
+      );
+    }
+    for (final color in AccentColor.values) {
+      if (color.name == text) return (preset: color, custom: null);
+    }
+    return null;
+  }
+
+  /// 套用 [accentValue] 读回的结果。
+  void applyAccent(String? text) {
+    final parsed = parseAccent(text);
+    if (parsed == null) return;
+    custom = parsed.custom;
+    if (parsed.preset != null) accent = parsed.preset!;
+    notifyListeners();
+  }
+
+  void update({
+    Brightness? brightness,
+    bool system = false,
+    bool? transparency,
+    bool? motion,
+    AccentColor? accent,
+    Color? custom,
+  }) {
+    // 选了预设就取消手动颜色；选了手动颜色则覆盖预设。
+    if (accent != null) this.custom = null;
+    if (custom != null) this.custom = custom;
+    this.accent = accent ?? this.accent;
+    if (system) {
+      this.brightness = null;
+    } else if (brightness != null) {
+      this.brightness = brightness;
+    }
+    reduceTransparency = transparency ?? reduceTransparency;
+    reduceMotion = motion ?? reduceMotion;
+    notifyListeners();
+  }
+}
+
+class AppearanceScope extends InheritedNotifier<Appearance> {
+  const AppearanceScope({
+    super.key,
+    required Appearance appearance,
+    required super.child,
+  }) : super(notifier: appearance);
+  static Appearance? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<AppearanceScope>()?.notifier;
+}
