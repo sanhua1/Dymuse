@@ -86,10 +86,11 @@ iOS 与 macOS 完成度较高；Android 已可用，只在作者的一台 Sony X
 flutter pub get
 flutter test                  # 单元测试，不联网
 flutter run -d macos          # 或连接 iPhone 后 flutter run
-flutter build apk --release   # Android，产物在 build/app/outputs/flutter-apk/
+flutter build apk --release --target-platform android-arm64   # Android，产物在 build/app/outputs/flutter-apk/
 ```
 
 - **签名**：工程里没有保存团队 ID。真机运行和发布需要在 Xcode 里打开 `ios/Runner.xcworkspace`、`macos/Runner.xcworkspace`，把 Team 改成你自己的，并把 Bundle ID（`app.dymuse.allinone`）换成你自己的。
+- **Android 安装包体积**：不加 `--target-platform` 会打包 arm64、armeabi-v7a、x86_64 三套架构，约 60MB；只打 arm64 约 22MB，Release 里的 APK 就是 arm64 的。
 - **Android 签名**：release 暂用调试签名，方便自行侧载安装。要长期分发请在 `android/app/build.gradle.kts` 里换成你自己的发布密钥，并同样替换包名 `app.dymuse.allinone`。
 - **Android 播放通知**：第一次播放时会请求通知权限（Android 13+），不授权也能播放，只是没有通知栏控制。
 - **macOS 钥匙串**：默认的临时签名每次构建都不同，钥匙串里的登录凭证会反复弹窗。用 `DYMUSE_SIGN_IDENTITY="Apple Development: …" tool/build_mac.sh` 以固定证书构建可避免。
