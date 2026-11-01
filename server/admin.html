@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Dymuse 取链服务</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #fff; --ink: #1d1d1f; --sub: #6e6e73; --line: #e5e5ea;
+    --tint: #fa2d55; --tint-ink: #fff; --ok: #1f9d55; --bad: #d92d20; --field: #f2f2f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000; --card: #1c1c1e; --ink: #f5f5f7; --sub: #98989d; --line: #2c2c2e;
+      --tint: #ff375f; --ok: #32d74b; --bad: #ff6961; --field: #2c2c2e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 32px 16px 56px; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: .2px; }
+  .lead { color: var(--sub); margin: 0 0 24px; }
+  .card { background: var(--card); border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--line); }
+  .card h2 { font-size: 13px; color: var(--sub); font-weight: 600; margin: 0 0 12px; }
+  .name { font-size: 20px; font-weight: 600; }
+  .meta { color: var(--sub); font-size: 13px; margin-top: 2px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 999px; padding: 9px 18px; cursor: pointer;
+    background: var(--field); color: var(--ink); transition: opacity .15s, transform .15s;
+  }
+  button.primary { background: var(--tint); color: var(--tint-ink); }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: default; }
+  label { display: block; font-size: 13px; color: var(--sub); margin: 12px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  input, textarea {
+    width: 100%; font: inherit; color: var(--ink); background: var(--field); border: 1px solid transparent;
+    border-radius: 12px; padding: 11px 13px; outline: none;
+  }
+  input:focus, textarea:focus { border-color: var(--tint); }
+  textarea { min-height: 96px; resize: vertical; font-size: 13px; word-break: break-all; }
+  .msg { margin-top: 12px; font-size: 13px; min-height: 20px; color: var(--sub); }
+  .msg.ok { color: var(--ok); } .msg.bad { color: var(--bad); }
+  .qr { text-align: center; }
+  .qr img { width: 200px; height: 200px; border-radius: 12px; background: #fff; padding: 8px; image-rendering: pixelated; }
+  .hidden { display: none !important; }
+  details { margin-top: 16px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .note { color: var(--sub); font-size: 12px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Dymuse 取链服务</h1>
+  <p class="lead">让 App 用同一个网易云会员账号取歌曲链接。</p>
+
+  <section class="card hidden" id="setup">
+    <h2>首次使用：设置账号和密码</h2>
+    <label for="sCode">初始化口令</label>
+    <input id="sCode" autocomplete="off" placeholder="在服务器的启动日志里">
+    <label for="sUser">账号</label>
+    <input id="sUser" autocomplete="username" placeholder="例如 family">
+    <label for="sPass">密码（至少 8 位）</label>
+    <input id="sPass" type="password" autocomplete="new-password">
+    <label for="sPass2">再输入一次密码</label>
+    <input id="sPass2" type="password" autocomplete="new-password">
+    <div class="row"><button class="primary" id="sSave">完成设置</button></div>
+    <div class="msg" id="sMsg"></div>
+    <p class="meta">初始化口令用来证明你有这台服务器的权限：<br>Docker 部署运行 <code>docker compose logs link-service</code>，或在服务器上运行 <code>server.py setup-code</code>。</p>
+  </section>
+
+  <section class="card hidden" id="login">
+    <h2>登录</h2>
+    <label for="lUser">账号</label>
+    <input id="lUser" autocomplete="username">
+    <label for="lPass">密码</label>
+    <input id="lPass" type="password" autocomplete="current-password">
+    <div class="row"><button class="primary" id="lEnter">登录</button></div>
+    <div class="msg" id="lMsg"></div>
+  </section>
+
+  <div id="panel" class="hidden">
+    <section class="card">
+      <h2>当前取链账号</h2>
+      <div class="name" id="accName">尚未设置</div>
+      <div class="meta" id="accMeta"></div>
+      <div class="row">
+        <button id="verify">验证取链</button>
+      </div>
+      <div class="msg" id="verifyMsg"></div>
+    </section>
+
+    <section class="card">
+      <h2>更换取链账号</h2>
+      <div id="qrPart">
+        <div class="qr hidden" id="qrBox">
+          <img id="qrImg" alt="网易云扫码登录二维码">
+          <div class="msg" id="qrMsg"></div>
+        </div>
+        <div class="row" style="margin-top:0">
+          <button class="primary" id="qrStart">扫码登录</button>
+        </div>
+      </div>
+      <details id="pasteBox">
+        <summary id="pasteTitle">粘贴 Cookie</summary>
+        <p class="meta">在浏览器登录 music.163.com 后复制 Cookie，或只粘贴 MUSIC_U 的值。<span id="pasteWarn" class="hidden"> 服务没有配置网易云 API，保存时不会核对账号。</span></p>
+        <textarea id="paste" placeholder="MUSIC_U=…; __csrf=…" spellcheck="false" autocomplete="off"></textarea>
+        <div class="row"><button id="pasteSave">保存</button></div>
+        <div class="msg" id="pasteMsg"></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>登录账号（App 里填的那一组）</h2>
+      <label for="aUser">账号</label>
+      <input id="aUser" autocomplete="username">
+      <label for="aCur">当前密码</label>
+      <input id="aCur" type="password" autocomplete="current-password">
+      <label for="aNew">新密码（不改就留空）</label>
+      <input id="aNew" type="password" autocomplete="new-password">
+      <div class="row"><button id="aSave">保存</button><button id="logout">退出登录</button></div>
+      <div class="msg" id="aMsg"></div>
+    </section>
+  </div>
+
+  <p class="note">取链账号的 Cookie 只保存在服务器上，不会显示在这个页面。更换取链账号后，App 最迟 6 小时内自动改用新账号。</p>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const VIP = { 0: '非会员', 10: '音乐包', 11: '黑胶 VIP', 12: '黑胶 SVIP' };
+  let auth = '';
+  let qrTimer = null;
+  try { auth = sessionStorage.getItem('dymuseAuth') || ''; } catch (_) {}
+
+  const say = (id, text, kind) => { const el = $(id); el.textContent = text || ''; el.className = 'msg' + (kind ? ' ' + kind : ''); };
+  const basic = (user, pass) => 'Basic ' + btoa(unescape(encodeURIComponent(user + ':' + pass)));
+  const show = (view) => { for (const id of ['setup', 'login', 'panel']) $(id).classList.toggle('hidden', id !== view); };
+
+  async function api(method, path, body, header = auth) {
+    const headers = {};
+    if (header) headers['Authorization'] = header;
+    if (body) headers['Content-Type'] = 'application/json';
+    const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : (method === 'POST' ? '' : undefined) });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    return { status: res.status, data };
+  }
+
+  function ago(iso) {
+    const t = Date.parse(iso);
+    if (!t) return '';
+    const s = Math.max(1, Math.floor((Date.now() - t) / 1000));
+    if (s < 3600) return Math.max(1, Math.floor(s / 60)) + ' 分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + ' 小时前';
+    return Math.floor(s / 86400) + ' 天前';
+  }
+
+  function render(st) {
+    const a = st.account || {};
+    if (!st.configured) {
+      $('accName').textContent = '尚未设置';
+      $('accMeta').textContent = '用下面的方式设置一个会员账号。';
+    } else {
+      const label = a.nickname ? a.nickname + ' · ' + (VIP[a.vipType] || '会员') : '已保存（未核对账号）';
+      $('accName').textContent = label;
+      $('accMeta').textContent = '更新于 ' + ago(st.updatedAt) + ' · 第 ' + st.version + ' 版';
+    }
+    $('verify').classList.toggle('hidden', !st.netease);
+    $('verify').disabled = !st.configured;
+    $('qrPart').classList.toggle('hidden', !st.netease);
+    $('pasteWarn').classList.toggle('hidden', !!st.netease);
+    $('pasteBox').open = !st.netease;
+    $('pasteTitle').textContent = st.netease ? '改用粘贴 Cookie' : '粘贴 Cookie';
+    $('aUser').value = st.username || '';
+  }
+
+  async function start() {
+    const health = await api('GET', '/health', null, '');
+    if (health.data.setup) return show('setup');
+    if (auth) {
+      const { status, data } = await api('GET', '/v1/status');
+      if (status === 200) { render(data); return show('panel'); }
+      try { sessionStorage.removeItem('dymuseAuth'); } catch (_) {}
+      auth = '';
+    }
+    show('login');
+  }
+
+  $('sSave').onclick = async () => {
+    const user = $('sUser').value.trim(), pass = $('sPass').value;
+    if (!$('sCode').value.trim() || !user) return say('sMsg', '请填写初始化口令和账号。', 'bad');
+    if (pass.length < 8) return say('sMsg', '密码至少 8 位。', 'bad');
+    if (pass !== $('sPass2').value) return say('sMsg', '两次输入的密码不一致。', 'bad');
+    $('sSave').disabled = true;
+    const { status, data } = await api('POST', '/v1/setup', { code: $('sCode').value.trim(), username: user, password: pass }, '');
+    $('sSave').disabled = false;
+    if (status === 200) {
+      auth = basic(user, pass);
+      try { sessionStorage.setItem('dymuseAuth', auth); } catch (_) {}
+      return start();
+    }
+    const text = { wrong_setup_code: '初始化口令不对。', invalid_username: '账号不能包含冒号，最长 32 个字符。', invalid_password: '密码需要 8～128 位。', already_set_up: '已经设置过了，请登录。' }[data.error];
+    say('sMsg', status === 429 ? '尝试次数过多，请稍后再试。' : (text || '设置失败（' + status + '）。'), 'bad');
+  };
+
+  $('lEnter').onclick = async () => {
+    const user = $('lUser').value.trim(), pass = $('lPass').value;
+    if (!user || !pass) return;
+    auth = basic(user, pass);
+    const { status, data } = await api('GET', '/v1/status');
+    if (status === 200) {
+      try { sessionStorage.setItem('dymuseAuth', auth); } catch (_) {}
+      $('lPass').value = ''; say('lMsg', '');
+      render(data); return show('panel');
+    }
+    auth = '';
+    say('lMsg', status === 429 ? '尝试次数过多，请稍后再试。' : '账号或密码不正确。', 'bad');
+  };
+  $('lPass').onkeydown = (e) => { if (e.key === 'Enter') $('lEnter').click(); };
+
+  $('logout').onclick = () => {
+    try { sessionStorage.removeItem('dymuseAuth'); } catch (_) {}
+    auth = ''; stopQr(); show('login');
+  };
+
+  async function reload() { const r = await api('GET', '/v1/status'); if (r.status === 200) render(r.data); }
+
+  $('verify').onclick = async () => {
+    $('verify').disabled = true;
+    say('verifyMsg', '正在向网易云取一首需要会员的歌的链接…');
+    const { status, data } = await api('POST', '/v1/verify');
+    $('verify').disabled = false;
+    if (status !== 200) return say('verifyMsg', status === 502 ? '网易云接口暂时不可用。' : '验证失败（' + status + '）。', 'bad');
+    if (data.ok) say('verifyMsg', '取链正常：' + (data.type || '').toUpperCase() + ' ' + (data.br ? Math.round(data.br / 1000) + ' kbps' : '') + '（' + (data.level || '') + '）', 'ok');
+    else if (data.trial) say('verifyMsg', '只拿到试听片段，这个账号可能不是会员或已过期。', 'bad');
+    else say('verifyMsg', '没有拿到链接，账号可能已失效，请重新登录。', 'bad');
+  };
+
+  function stopQr() { if (qrTimer) { clearInterval(qrTimer); qrTimer = null; } }
+
+  $('qrStart').onclick = async () => {
+    stopQr();
+    $('qrStart').disabled = true;
+    const { status, data } = await api('POST', '/v1/qr/start');
+    $('qrStart').disabled = false;
+    $('qrBox').classList.remove('hidden');
+    if (status !== 200) { $('qrImg').removeAttribute('src'); return say('qrMsg', '获取二维码失败（' + status + '）。', 'bad'); }
+    $('qrImg').src = data.qrimg;
+    say('qrMsg', '请用要设置的会员账号在网易云音乐 App 里扫码。');
+    let busy = false;
+    qrTimer = setInterval(async () => {
+      if (busy) return; busy = true;
+      try {
+        const r = await api('GET', '/v1/qr/check?key=' + encodeURIComponent(data.key));
+        if (r.status !== 200) { stopQr(); return say('qrMsg', '检查扫码状态失败（' + r.status + '）。', 'bad'); }
+        const code = r.data.code;
+        if (code === 801) say('qrMsg', '等待扫码…');
+        else if (code === 802) say('qrMsg', '已扫码，请在手机上确认登录。');
+        else if (code === 800) { stopQr(); say('qrMsg', '二维码已过期，请重新点“扫码登录”。', 'bad'); }
+        else if (code === 803) {
+          stopQr();
+          $('qrBox').classList.add('hidden'); say('qrMsg', '');
+          await reload();
+          say('verifyMsg', '已更换为「' + ((r.data.account || {}).nickname || '') + '」，建议点“验证取链”确认。', 'ok');
+        }
+      } finally { busy = false; }
+    }, 2000);
+  };
+
+  $('pasteSave').onclick = async () => {
+    const text = $('paste').value.trim();
+    if (!text) return;
+    $('pasteSave').disabled = true;
+    const { status, data } = await api('POST', '/v1/credential/paste', { cookie: text });
+    $('pasteSave').disabled = false;
+    if (status === 200) {
+      $('paste').value = ''; say('pasteMsg', '已保存。', 'ok'); await reload();
+      say('verifyMsg', data.validated ? '已更换为「' + ((data.account || {}).nickname || '') + '」，建议点“验证取链”确认。' : '已保存（未核对账号）。', 'ok');
+    } else {
+      say('pasteMsg', status === 400 ? '这份 Cookie 无效或已过期。' : '保存失败（' + status + '）。', 'bad');
+    }
+  };
+
+  $('aSave').onclick = async () => {
+    const user = $('aUser').value.trim(), cur = $('aCur').value, next = $('aNew').value;
+    if (!user || !cur) return say('aMsg', '请填写账号和当前密码。', 'bad');
+    if (next && next.length < 8) return say('aMsg', '新密码至少 8 位。', 'bad');
+    $('aSave').disabled = true;
+    const { status, data } = await api('POST', '/v1/account', { username: user, currentPassword: cur, newPassword: next });
+    $('aSave').disabled = false;
+    if (status === 200) {
+      auth = basic(data.username, next || cur);
+      try { sessionStorage.setItem('dymuseAuth', auth); } catch (_) {}
+      $('aCur').value = ''; $('aNew').value = '';
+      return say('aMsg', '已保存。App 里需要改成新的账号和密码。', 'ok');
+    }
+    const text = { wrong_password: '当前密码不对。', invalid_username: '账号不能包含冒号，最长 32 个字符。', invalid_password: '密码需要 8～128 位。' }[data.error];
+    say('aMsg', status === 429 ? '尝试次数过多，请稍后再试。' : (text || '保存失败（' + status + '）。'), 'bad');
+  };
+
+  start();
+})();
+</script>
+</body>
+</html>

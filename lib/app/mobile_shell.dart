@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as glass;
 import '../core/session.dart';
 import '../design_system/components.dart';
+import '../design_system/sheet.dart';
 import '../design_system/tokens.dart';
 import '../features/browse_page.dart';
 import '../features/catalog.dart';
@@ -91,7 +92,14 @@ class _MobileShellState extends State<MobileShell>
     with SingleTickerProviderStateMixin {
   // Tab 栏高度与迷你播放器高度，用于给列表底部留白；顶栏高度用于顶部留白。
   static const _topBar = _TopBar.height;
-  static const _tabBar = 64.0, _tabPadding = 20.0, _mini = 58.0, _gap = 8.0;
+  static const _tabBar = 64.0, _tabPadding = 20.0, _mini = 64.0, _gap = 8.0;
+
+  // 迷你播放器与 Tab 栏同高同圆角（半圆端点），封面圆心与端点圆心重合。
+  // 进度条夹在两者之间，上下各留 [_progressGap]：播放器画在 Tab 栏上方留白里压下 6，
+  // Tab 栏玻璃距其组件顶部 [_tabPadding]，据此算出两者之间要留的高度。
+  static const _progressGap = 8.0, _progressBar = 4.0, _miniOverlap = 6.0;
+  static const _progressZone =
+      _progressGap * 2 + _progressBar - (_tabPadding - _miniOverlap);
   late final browsers = {
     for (final mode in MusicMode.values)
       mode: BrowseState(mode, widget.catalog),
@@ -373,7 +381,7 @@ class _MobileShellState extends State<MobileShell>
     unawaited(browser.openCollection(target));
   }
 
-  Future<void> openPlayer() => showCupertinoSheet<void>(
+  Future<void> openPlayer() => showDymuseSheet<void>(
     context: context,
     builder: (sheet) => PhonePlayer(
       controller: playback,
@@ -385,15 +393,19 @@ class _MobileShellState extends State<MobileShell>
     ),
   );
 
-  Future<void> openSettings() => showCupertinoSheet<void>(
-    context: context,
-    builder: (sheet) => _SettingsSheet(
-      session: widget.session,
-      appearance: widget.appearance,
-      playback: widget.playback,
-      onDone: () => Navigator.of(sheet).pop(),
-    ),
-  );
+  Future<void> openSettings() async {
+    await showDymuseSheet<void>(
+      context: context,
+      builder: (sheet) => _SettingsSheet(
+        session: widget.session,
+        appearance: widget.appearance,
+        playback: widget.playback,
+        onDone: () => Navigator.of(sheet).pop(),
+      ),
+    );
+    // 设置里改的“迷你播放器进度条”，回到主页后才开始过渡。
+    widget.appearance.commitMiniProgress();
+  }
 
   /// 顶部返回按钮。返回手势中随进度淡出：
   /// 上一级页面也有返回按钮时保持不变；没有时一路淡到透明，不会在松手时突然消失。
@@ -425,12 +437,22 @@ class _MobileShellState extends State<MobileShell>
   Widget build(BuildContext context) {
     // 顶部返回按钮取决于浏览状态（是否进入集合），因此同时监听两种模式的浏览状态。
     final shell = ListenableBuilder(
-      listenable: Listenable.merge([playback, ...browsers.values]),
+      listenable: Listenable.merge([
+        playback,
+        widget.appearance,
+        sheetCovering,
+        ...browsers.values,
+      ]),
       builder: (context, _) {
+        final covered = sheetCovering.value;
         final showMini = playback.track != null;
         // 内容在悬浮 Tab 栏与迷你播放器下方滚动，末尾留出它们的高度。
+        final progressOn = widget.appearance.miniProgressShown;
         final reserve =
-            _tabBar + _tabPadding + (showMini ? _mini + _gap : 0) + 12;
+            _tabBar +
+            _tabPadding +
+            (showMini ? _mini + _gap + _progressZone : 0) +
+            12;
         return ColoredBox(
           color: DymuseTokens.background(context),
           child: Stack(
@@ -443,8 +465,9 @@ class _MobileShellState extends State<MobileShell>
                   style: DymuseTokens.android
                       ? glass.GlassScrollEdgeStyle.soft
                       : glass.GlassScrollEdgeStyle.blur,
-                  topFadeHeight:
-                      MediaQuery.paddingOf(context).top + _topBar + 16,
+                  topFadeHeight: covered
+                      ? 0
+                      : MediaQuery.paddingOf(context).top + _topBar + 16,
                   fadeBottom: false,
                   child: _PageGestures(
                     pageKey: _pageKey(),
@@ -455,9 +478,15 @@ class _MobileShellState extends State<MobileShell>
                     onSwipe: swipeTab,
                     pull: _pull,
                     leaving: _leaving,
-                    child: _ReservePadding(
-                      top: _topBar,
-                      bottom: reserve,
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(end: reserve),
+                      duration: DymuseTokens.motion,
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, child) => _ReservePadding(
+                        top: _topBar,
+                        bottom: value,
+                        child: child!,
+                      ),
                       child: _content(),
                     ),
                   ),
@@ -506,69 +535,101 @@ class _MobileShellState extends State<MobileShell>
                         final keyboard =
                             MediaQuery.viewInsetsOf(context).bottom > 0;
                         final mini = showMini && !(searching && keyboard);
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
+                        final progress = mini && progressOn;
+                        return Stack(
+                          clipBehavior: Clip.none,
                           children: [
-                            KeyedSubtree(
-                              key: const ValueKey('mini'),
-                              child: mini
-                                  ? Transform.translate(
-                                      // 与库的排布一致：压进 Tab 栏上方留白 6pt。
-                                      offset: const Offset(0, 6),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: _tabPadding,
-                                        ),
-                                        child: _MiniBar(
-                                          controller: playback,
-                                          onOpen: openPlayer,
-                                        ),
-                                      ),
-                                    )
-                                  : const SizedBox.shrink(),
-                            ),
-                            KeyedSubtree(
-                              key: const ValueKey('tabs'),
-                              child: glass.GlassTabBar.searchable(
-                                tabs: [
-                                  for (final spec in tabs)
-                                    glass.GlassTab(
-                                      icon: Icon(spec.icon),
-                                      activeIcon: Icon(
-                                        spec.activeIcon ?? spec.icon,
-                                      ),
-                                      label: spec.label,
-                                    ),
-                                ],
-                                selectedIndex: tab,
-                                onTabSelected: selectTab,
-                                labelFontSize: tabs.length > 2 ? 10 : 11,
-                                isSearchActive: searching,
-                                selectedIconColor: DymuseTokens.tint(context),
-                                selectedLabelColor: DymuseTokens.tint(context),
-                                searchConfig: glass.GlassSearchBarConfig(
-                                  onSearchToggle: toggleSearch,
-                                  hintText: '搜索',
-                                  controller: search,
-                                  focusNode: searchFocus,
-                                  textInputAction: TextInputAction.search,
-                                  onSubmitted: submitSearch,
-                                  autoFocusOnExpand: false,
-                                  // 库默认的 × 只收起输入法；这里让它关闭搜索并回到原页面。
-                                  onCancelTap: () => toggleSearch(false),
-                                  cancelButtonSemanticLabel: '关闭搜索',
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                KeyedSubtree(
+                                  key: const ValueKey('mini'),
+                                  child: mini
+                                      ? Transform.translate(
+                                          // 与库的排布一致：压进 Tab 栏上方留白。
+                                          offset: const Offset(0, _miniOverlap),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: _tabPadding,
+                                            ),
+                                            child: _MiniBar(
+                                              controller: playback,
+                                              onOpen: openPlayer,
+                                            ),
+                                          ),
+                                        )
+                                      : const SizedBox.shrink(),
                                 ),
-                                quality: DymuseTokens.glassQuality,
-                                // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
-                                settings: DymuseTokens.android
-                                    ? glass.LiquidGlassSettings(
-                                        blur: 0,
-                                        thickness: 18,
-                                        glassColor: DymuseTokens.background(
-                                          context,
-                                        ).withValues(alpha: .96),
-                                      )
-                                    : null,
+                                // 进度条出现时把播放器向上推开，为它腾出位置。
+                                AnimatedContainer(
+                                  duration: DymuseTokens.motion,
+                                  curve: Curves.easeOutCubic,
+                                  height: progress ? _progressZone : 0,
+                                ),
+                                KeyedSubtree(
+                                  key: const ValueKey('tabs'),
+                                  child: glass.GlassTabBar.searchable(
+                                    tabs: [
+                                      for (final spec in tabs)
+                                        glass.GlassTab(
+                                          icon: Icon(spec.icon),
+                                          activeIcon: Icon(
+                                            spec.activeIcon ?? spec.icon,
+                                          ),
+                                          label: spec.label,
+                                        ),
+                                    ],
+                                    selectedIndex: tab,
+                                    onTabSelected: selectTab,
+                                    labelFontSize: tabs.length > 2 ? 10 : 11,
+                                    isSearchActive: searching,
+                                    selectedIconColor: DymuseTokens.tint(
+                                      context,
+                                    ),
+                                    selectedLabelColor: DymuseTokens.tint(
+                                      context,
+                                    ),
+                                    searchConfig: glass.GlassSearchBarConfig(
+                                      onSearchToggle: toggleSearch,
+                                      hintText: '搜索',
+                                      controller: search,
+                                      focusNode: searchFocus,
+                                      textInputAction: TextInputAction.search,
+                                      onSubmitted: submitSearch,
+                                      autoFocusOnExpand: false,
+                                      // 库默认的 × 只收起输入法；这里让它关闭搜索并回到原页面。
+                                      onCancelTap: () => toggleSearch(false),
+                                      cancelButtonSemanticLabel: '关闭搜索',
+                                    ),
+                                    quality: DymuseTokens.glassQuality,
+                                    // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
+                                    settings: DymuseTokens.android
+                                        ? glass.LiquidGlassSettings(
+                                            blur: 0,
+                                            thickness: 18,
+                                            glassColor: DymuseTokens.background(
+                                              context,
+                                            ).withValues(alpha: .96),
+                                          )
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            // 进度条：左右对齐到两端半圆的圆心，上下与播放器、Tab 栏等距。
+                            Positioned(
+                              left: _tabPadding + _mini / 2,
+                              right: _tabPadding + _mini / 2,
+                              top: _mini + _miniOverlap + _progressGap - 6,
+                              height: 16,
+                              child: IgnorePointer(
+                                ignoring: !progress,
+                                child: AnimatedOpacity(
+                                  duration: DymuseTokens.motion,
+                                  curve: Curves.easeOut,
+                                  opacity: progress ? 1 : 0,
+                                  child: _MiniProgress(controller: playback),
+                                ),
                               ),
                             ),
                           ],
@@ -673,6 +734,7 @@ class _TopBar extends StatelessWidget {
                 child: GlassPopupMenu(
                   entries: modes,
                   width: 190,
+                  glassTrigger: true,
                   builder: (context, open) => _GlassPill(
                     label: '切换音乐来源，当前$modeLabel',
                     onPressed: open,
@@ -873,84 +935,89 @@ class _MiniBar extends StatelessWidget {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: onOpen,
+          // 与 Tab 栏同高（64）同圆角（32，两端是半圆），并使用与 Tab 栏相同的玻璃参数；
+          // 封面圆心（距左 10 + 半径 22）正好落在左端半圆的圆心上。
           child: GlassPanel(
-            radius: 29,
-            padding: const EdgeInsets.fromLTRB(9, 0, 6, 0),
+            radius: 32,
+            settings: kBarGlassSettings,
             child: SizedBox(
-              height: 58,
-              child: Row(
-                children: [
-                  RemoteArtwork(
-                    api: controller.api,
-                    url: track?.cover,
-                    seed: track?.album ?? 'Dymuse',
-                    size: 40,
-                    radius: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          track?.title ?? '',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (controller.error != null)
-                          Text(
-                            controller.error!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: DymuseTokens.tint(context),
-                            ),
-                          )
-                        else if ((track?.artist ?? '').isNotEmpty)
-                          Text(
-                            track!.artist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: DymuseTokens.caption.copyWith(
-                              color: DymuseTokens.secondary(context),
-                            ),
-                          ),
-                      ],
+              height: 64,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 0),
+                child: Row(
+                  children: [
+                    RemoteArtwork(
+                      api: controller.api,
+                      url: track?.cover,
+                      seed: track?.album ?? 'Dymuse',
+                      size: 44,
+                      radius: 22,
                     ),
-                  ),
-                  _MiniButton(
-                    label: '上一首',
-                    icon: CupertinoIcons.backward_fill,
-                    onPressed: controller.previous,
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: controller.engine.playing,
-                    builder: (_, playing, _) =>
-                        controller.loading && controller.current == null
-                        ? const SizedBox(
-                            width: 40,
-                            child: CupertinoActivityIndicator(),
-                          )
-                        : _MiniButton(
-                            label: playing ? '暂停' : '播放',
-                            icon: playing
-                                ? CupertinoIcons.pause_fill
-                                : CupertinoIcons.play_fill,
-                            onPressed: controller.toggle,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            track?.title ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                  ),
-                  _MiniButton(
-                    label: '下一首',
-                    icon: CupertinoIcons.forward_fill,
-                    onPressed: () => controller.next(),
-                  ),
-                ],
+                          if (controller.error != null)
+                            Text(
+                              controller.error!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: DymuseTokens.tint(context),
+                              ),
+                            )
+                          else if ((track?.artist ?? '').isNotEmpty)
+                            Text(
+                              track!.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: DymuseTokens.caption.copyWith(
+                                color: DymuseTokens.secondary(context),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    _MiniButton(
+                      label: '上一首',
+                      icon: CupertinoIcons.backward_fill,
+                      onPressed: controller.previous,
+                    ),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: controller.engine.playing,
+                      builder: (_, playing, _) =>
+                          controller.loading && controller.current == null
+                          ? const SizedBox(
+                              width: 40,
+                              child: CupertinoActivityIndicator(),
+                            )
+                          : _MiniButton(
+                              label: playing ? '暂停' : '播放',
+                              icon: playing
+                                  ? CupertinoIcons.pause_fill
+                                  : CupertinoIcons.play_fill,
+                              onPressed: controller.toggle,
+                            ),
+                    ),
+                    _MiniButton(
+                      label: '下一首',
+                      icon: CupertinoIcons.forward_fill,
+                      onPressed: () => controller.next(),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -958,6 +1025,113 @@ class _MiniBar extends StatelessWidget {
       );
     },
   );
+}
+
+/// 迷你播放器下方的液态玻璃进度条：玻璃凹槽里填充强调色，点按或拖动即可跳转。
+class _MiniProgress extends StatefulWidget {
+  const _MiniProgress({required this.controller});
+  final PlaybackController controller;
+  @override
+  State<_MiniProgress> createState() => _MiniProgressState();
+}
+
+class _MiniProgressState extends State<_MiniProgress> {
+  double? dragging;
+
+  void _seekTo(double fraction) {
+    final total = widget.controller.engine.duration.value;
+    if (total <= Duration.zero) return;
+    unawaited(widget.controller.seek(total * fraction.clamp(0.0, 1.0)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = widget.controller.engine;
+    final tint = DymuseTokens.tint(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([engine.position, engine.duration]),
+      builder: (context, _) {
+        final total = engine.duration.value;
+        final position = engine.position.value;
+        final progress =
+            dragging ??
+            (total <= Duration.zero
+                ? 0.0
+                : (position.inMilliseconds / total.inMilliseconds).clamp(
+                    0.0,
+                    1.0,
+                  ));
+        return Semantics(
+          label: '播放进度',
+          slider: true,
+          value: timeLabel(position),
+          increasedValue: timeLabel(position + const Duration(seconds: 10)),
+          decreasedValue: timeLabel(position - const Duration(seconds: 10)),
+          onIncrease: () =>
+              widget.controller.seek(position + const Duration(seconds: 10)),
+          onDecrease: () =>
+              widget.controller.seek(position - const Duration(seconds: 10)),
+          child: SizedBox(
+            height: 16,
+            child: Padding(
+              padding: EdgeInsets.zero,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  double at(Offset local) =>
+                      (local.dx / constraints.maxWidth).clamp(0.0, 1.0);
+                  final active = dragging != null;
+                  final ink = DymuseTokens.ink(context);
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapUp: (details) => _seekTo(at(details.localPosition)),
+                    onHorizontalDragStart: (details) =>
+                        setState(() => dragging = at(details.localPosition)),
+                    onHorizontalDragUpdate: (details) =>
+                        setState(() => dragging = at(details.localPosition)),
+                    onHorizontalDragEnd: (_) {
+                      final target = dragging;
+                      setState(() => dragging = null);
+                      if (target != null) _seekTo(target);
+                    },
+                    onHorizontalDragCancel: () =>
+                        setState(() => dragging = null),
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: Padding(
+                        padding: EdgeInsets.zero,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          curve: Curves.easeOut,
+                          height: active ? 8 : 4,
+                          decoration: BoxDecoration(
+                            color: ink.withValues(alpha: .16),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: progress,
+                              heightFactor: 1,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: tint,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _MiniButton extends StatelessWidget {
@@ -997,31 +1171,87 @@ class _SettingsSheet extends StatelessWidget {
   final PlaybackController playback;
   final VoidCallback onDone;
   @override
-  Widget build(BuildContext context) => ColoredBox(
-    color: DymuseTokens.background(context),
-    child: SafeArea(
-      child: Column(
+  Widget build(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    return ColoredBox(
+      color: DymuseTokens.background(context),
+      child: Stack(
         children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: CupertinoButton(
-              minimumSize: const Size(44, 44),
-              onPressed: onDone,
-              child: const Text('完成'),
+          // 与主页一致：内容延伸到顶栏下方，上滑时在玻璃顶栏后渐进模糊。
+          Positioned.fill(
+            child: glass.GlassScrollEdgeEffect(
+              style: DymuseTokens.android
+                  ? glass.GlassScrollEdgeStyle.soft
+                  : glass.GlassScrollEdgeStyle.blur,
+              topFadeHeight: top + _TopBar.height + 16,
+              fadeBottom: false,
+              // 模糊半径大时着色器按固定步长取样，细笔画会采成重影、反而看得清；
+              // 半径压低到取样连续的范围，再叠一层渐隐的底色，顶部的字就彻底看不清了。
+              maxSigma: 5,
+              child: SettingsPage(
+                key: ValueKey(session.username),
+                session: session,
+                appearance: appearance,
+                playback: playback,
+                topInset: top + _TopBar.height - 20,
+              ),
             ),
           ),
-          Expanded(
-            child: SettingsPage(
-              key: ValueKey(session.username),
-              session: session,
-              appearance: appearance,
-              playback: playback,
+          Positioned(
+            left: 0,
+            top: 0,
+            right: 0,
+            height: top + _TopBar.height + 16,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      DymuseTokens.background(context).withValues(alpha: .92),
+                      DymuseTokens.background(context).withValues(alpha: .6),
+                      DymuseTokens.background(context).withValues(alpha: 0),
+                    ],
+                    stops: const [0, .55, 1],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: SizedBox(
+                height: _TopBar.height,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _GlassPill(
+                      label: '完成',
+                      onPressed: onDone,
+                      child: Text(
+                        '完成',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: DymuseTokens.tint(context),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 /// 给内容底部加上悬浮 Tab 栏与迷你播放器的高度。单独成组件：键盘弹出的每一帧

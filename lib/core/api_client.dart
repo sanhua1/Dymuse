@@ -17,18 +17,27 @@ class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
   final http.Client _client;
   LocalBackend? backend;
+
   /// 本机伪地址：封面等界面代码用它判断“自有资源”，实际不发网络请求。
   String server = 'dymuse://local';
 
   /// 登录后为网易云用户 ID，用于切换账号时清理缓存与喜欢状态。
   String? token;
   void Function()? onUnauthorized;
+
+  /// 游客模式：没有登录网易云账号。依赖账号的接口直接抛 [loginRequired]，不去请求网易云。
+  bool guest = false;
+
+  /// 请求跳转到网易云登录页（由会话设置）。
+  void Function()? onLoginRequested;
+  void requestLogin() => onLoginRequested?.call();
   MediaCache? cache;
   String? cacheScope;
 
-  Uri uri(String path, [Map<String, dynamic>? query]) => Uri.parse(
-    'dymuse://local/api/v1$path',
-  ).replace(queryParameters: query?.map((key, value) => MapEntry(key, '$value')));
+  Uri uri(String path, [Map<String, dynamic>? query]) =>
+      Uri.parse('dymuse://local/api/v1$path').replace(
+        queryParameters: query?.map((key, value) => MapEntry(key, '$value')),
+      );
 
   Future<dynamic> get(String path, [Json? query]) async {
     final store = cache, scope = cacheScope;
@@ -71,6 +80,7 @@ class ApiClient {
         ? path.substring('/netease'.length)
         : path;
     final session = token;
+    if (guest && _needsAccount(method, relative)) throw loginRequired;
     try {
       return await local.handle(method, relative, query, body);
     } on LocalError catch (error) {
@@ -87,6 +97,23 @@ class ApiClient {
     }
   }
 
+  /// 登录网易云账号才能使用的接口：红心、我的歌单与歌单写入。
+  static bool _needsAccount(String method, String relative) {
+    final parts = relative
+        .split('?')
+        .first
+        .split('/')
+        .where((p) => p.isNotEmpty);
+    final first = parts.isEmpty ? '' : parts.first;
+    final second = parts.length > 1 ? parts.elementAt(1) : '';
+    return switch (first) {
+      'likelist' || 'like' || 'liked' || 'playlists' => true,
+      'user' => second == 'playlist',
+      'playlist' => second == 'create',
+      _ => false,
+    };
+  }
+
   /// 本地请求没有在途传输，保留接口以兼容关闭流程。
   void cancelPending() {}
 
@@ -94,6 +121,9 @@ class ApiClient {
     _client.close();
   }
 }
+
+/// 游客使用了需要网易云账号的功能；状态码为 0，不会被当成登录失效。
+const loginRequired = ApiException('LOGIN_REQUIRED', '请登录网易云账号之后使用这些功能。');
 
 class ApiException implements Exception {
   const ApiException(this.code, this.message, [this.status = 0]);

@@ -9,6 +9,7 @@ import '../local/backend.dart';
 import '../local/bilibili_backend.dart';
 import '../netease/anti_cheat.dart';
 import '../netease/client.dart';
+import '../link_service/link_service.dart';
 import '../sync/sync_service.dart';
 import 'api_client.dart';
 import 'media_cache.dart';
@@ -25,6 +26,9 @@ class Session extends ChangeNotifier {
   final SharedPreferences preferences;
   final FlutterSecureStorage storage;
   Json? user;
+
+  /// 游客：没有登录网易云账号，也能搜索、浏览和播放；依赖账号的功能提示登录。
+  bool guest = false;
   bool restoring = true;
   String? notice;
   int epoch = 0;
@@ -33,6 +37,9 @@ class Session extends ChangeNotifier {
 
   /// WebDAV 同步；由 main 创建后挂上，用来同步登录凭证等。
   SyncService? sync;
+
+  /// 取链服务（多人共享会员账号）；由 main 创建后挂上，没有配置时不起作用。
+  LinkService? linkService;
   LocalBackend? backend;
   String get username => user?['nickname']?.toString() ?? '';
 
@@ -45,11 +52,13 @@ class Session extends ChangeNotifier {
 
   static const _cookieKey = 'dymuse.netease.cookie';
   static const _biliCookieKey = 'dymuse.bilibili.cookie';
+  static const _guestKey = 'netease.guest';
 
   /// 设备标识固定；网易云 Cookie 作为一个受保护记录恢复。
   Future<void> restore() async {
     api.server = 'dymuse://local';
     api.onUnauthorized = expire;
+    api.onLoginRequested = () => unawaited(startLogin());
     if (!preferences.containsKey('deviceId')) {
       final random = Random.secure();
       await preferences.setString(
@@ -72,13 +81,15 @@ class Session extends ChangeNotifier {
         final profile = await backend!.refreshAccount();
         if (profile == null) {
           notice = '网易云登录已失效，请重新登录。';
-          _detach();
+          _reset();
         } else {
           _signIn(profile);
         }
+      } else if (preferences.getBool(_guestKey) == true) {
+        _enterGuest();
       }
     } catch (error) {
-      _detach();
+      _reset();
       notice = readableError(error);
     } finally {
       restoring = false;
@@ -100,13 +111,54 @@ class Session extends ChangeNotifier {
   Map<String, Map<String, String>?> syncCredentials() => {
     'netease': (netease?.loggedIn ?? false) ? {...netease!.cookie} : null,
     'bilibili': (bilibili?.loggedIn ?? false) ? {...bilibili!.cookie} : null,
+    // 取链服务的地址、账号、密码和开关；和登录凭证一样加密后才上传。
+    'link': (linkService?.configured ?? false)
+        ? {
+            'url': linkService!.url,
+            'username': linkService!.username,
+            'password': linkService!.password,
+            'enabled': linkService!.enabled ? '1' : '0',
+          }
+        : null,
   };
+
+  String? _linkSignature;
+
+  /// 取链服务的配置有变化（添加、修改、移除、开关）时尽快同步；刷新账号不算。
+  void linkServiceChanged() {
+    final service = linkService;
+    if (service == null) return;
+    final signature = service.configured
+        ? '${service.url}\n${service.username}\n${service.password}\n${service.enabled}'
+        : '';
+    if (signature == _linkSignature) return;
+    final first = _linkSignature == null;
+    _linkSignature = signature;
+    if (first) return;
+    if (signature.isEmpty) {
+      unawaited(sync?.noteLogout('link') ?? Future<void>.value());
+    } else {
+      unawaited(sync?.noteLogin('link') ?? Future<void>.value());
+      sync?.scheduleSoon();
+    }
+  }
 
   /// 同步来的凭证：保存并让对应账号立即生效。
   Future<void> applySyncedCredentials(
     String kind,
     Map<String, String> cookie,
   ) async {
+    if (kind == 'link') {
+      final service = linkService;
+      if (service == null || (cookie['url'] ?? '').isEmpty) return;
+      await service.configure(
+        url: cookie['url']!,
+        username: cookie['username'] ?? '',
+        password: cookie['password'] ?? '',
+      );
+      await service.setEnabled(cookie['enabled'] != '0');
+      return;
+    }
     if (kind == 'bilibili') {
       final client = bilibili ??= BilibiliClient(onCookie: _persistBili);
       client.cookie
@@ -122,7 +174,7 @@ class Session extends ChangeNotifier {
     final profile = await backend!.refreshAccount();
     if (profile == null) {
       notice = '同步来的网易云登录已失效，请重新登录。';
-      _detach();
+      _reset();
       notifyListeners();
       return;
     }
@@ -158,6 +210,8 @@ class Session extends ChangeNotifier {
       cookie: cookie,
       onCookie: _persist,
       antiCheat: _antiCheat.token,
+      vipCookie: () => linkService?.cookie,
+      onVipExpired: () async => linkService?.refresh(),
     );
     // B 站登录独立于网易云：网易云重新登录时沿用已有的 B 站客户端。
     final bili = bilibili ??= BilibiliClient(
@@ -183,10 +237,49 @@ class Session extends ChangeNotifier {
   }
 
   void _signIn(Map<String, dynamic> profile) {
+    guest = false;
+    api.guest = false;
+    unawaited(preferences.remove(_guestKey));
     // 界面按 'id' 判断账号切换，网易云资料里叫 userId。
     user = {...profile, 'id': profile['userId']};
     api.token = profile['userId']?.toString() ?? 'netease';
     _scope();
+    epoch++;
+    notice = null;
+    notifyListeners();
+  }
+
+  /// 先不登录，以游客身份使用。
+  Future<void> enterGuest() async {
+    await preferences.setBool(_guestKey, true);
+    _enterGuest();
+    notifyListeners();
+  }
+
+  void _enterGuest() {
+    guest = true;
+    api.guest = true;
+    user = {
+      'id': 'guest',
+      'userId': 'guest',
+      'nickname': '游客',
+      'avatarUrl': '',
+      'vipType': 0,
+    };
+    api.token = 'guest';
+    _scope();
+    epoch++;
+    notice = null;
+  }
+
+  /// 游客想用需要账号的功能：回到登录页（可再选择“先不登录”）。
+  Future<void> startLogin() async {
+    await preferences.remove(_guestKey);
+    guest = false;
+    api.guest = false;
+    api.token = null;
+    api.cacheScope = MediaCache.privateScope = null;
+    user = null;
     epoch++;
     notice = null;
     notifyListeners();
@@ -249,12 +342,20 @@ class Session extends ChangeNotifier {
     api.backend = null;
   }
 
+  /// 丢掉当前网易云连接并换一个没有登录信息的，登录页才能继续申请二维码。
+  void _reset() {
+    _detach();
+    _attach(null, bilibili?.cookie);
+  }
+
   void expire() {
+    // 游客没有会话可失效；依赖账号的功能在界面上提示登录。
+    if (guest) return;
     epoch++;
     api.token = null;
     api.cacheScope = MediaCache.privateScope = null;
     user = null;
-    _detach();
+    _reset();
     notice = '登录已结束，请使用网易云音乐扫码登录。';
     storage.write(key: _cookieKey, value: '').catchError((_) {});
     notifyListeners();

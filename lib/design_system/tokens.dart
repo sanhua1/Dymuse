@@ -121,6 +121,25 @@ class Appearance extends ChangeNotifier {
   bool reduceTransparency, reduceMotion;
   AccentColor accent;
 
+  /// 手机迷你播放器里是否显示进度条（每台设备自己的设置）。
+  bool miniProgress = true;
+
+  /// 主页实际采用的值：设置里改动后，等设置页关闭回到主页时才生效，
+  /// 这样小播放器的变化是在眼前发生的过渡动画，而不是在被盖住时悄悄完成。
+  late bool miniProgressShown = miniProgress;
+
+  void setMiniProgress(bool value) {
+    if (miniProgress == value) return;
+    miniProgress = value;
+    notifyListeners();
+  }
+
+  void commitMiniProgress() {
+    if (miniProgressShown == miniProgress) return;
+    miniProgressShown = miniProgress;
+    notifyListeners();
+  }
+
   /// 用户手动选的主题色；不为空时优先于 [accent]。
   Color? custom;
 

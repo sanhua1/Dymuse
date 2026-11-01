@@ -2,31 +2,46 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import '../core/api_client.dart';
 import '../design_system/components.dart';
+import 'login_required.dart';
 import '../design_system/tokens.dart';
 import 'catalog.dart';
 
 /// 底部和完整播放器共用歌曲操作，节目不显示歌曲红心或歌单入口。
 class SongActions extends StatelessWidget {
-  const SongActions({super.key, required this.catalog, required this.track});
+  const SongActions({
+    super.key,
+    required this.catalog,
+    required this.track,
+    this.bar = false,
+  });
   final Catalog catalog;
   final Track? track;
+
+  /// 桌面播放条里的紧凑样式：与旁边的歌词、队列按钮同尺寸。
+  final bool bar;
   @override
   Widget build(BuildContext context) {
     if (track == null || track!.isPodcast) return const SizedBox.shrink();
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        FavoriteButton(catalog: catalog, track: track!),
-        _PlaylistButton(catalog: catalog, track: track!),
+        FavoriteButton(catalog: catalog, track: track!, bar: bar),
+        _PlaylistButton(catalog: catalog, track: track!, bar: bar),
       ],
     );
   }
 }
 
 class FavoriteButton extends StatefulWidget {
-  const FavoriteButton({super.key, required this.catalog, required this.track});
+  const FavoriteButton({
+    super.key,
+    required this.catalog,
+    required this.track,
+    this.bar = false,
+  });
   final Catalog catalog;
   final Track track;
+  final bool bar;
   @override
   State<FavoriteButton> createState() => _FavoriteButtonState();
 }
@@ -66,28 +81,48 @@ class _FavoriteButtonState extends State<FavoriteButton> {
     builder: (_, _) {
       final liked =
           widget.catalog.favoriteValue(widget.track) ?? widget.track.favorite;
-      return ActionButton(
-        label: liked ? '取消喜欢' : '喜欢这首音乐',
-        icon: liked ? CupertinoIcons.heart_fill : CupertinoIcons.heart,
-        selected: liked,
-        onPressed: widget.catalog.favoriteBusy(widget.track)
-            ? null
-            : () async {
-                try {
-                  await widget.catalog.changeFavorite(widget.track);
-                } catch (error) {
-                  if (context.mounted) await _showError(context, error);
-                }
-              },
-      );
+      final onPressed = widget.catalog.favoriteBusy(widget.track)
+          ? null
+          : () async {
+              if (widget.track.mode == MusicMode.netease &&
+                  !await ensureLoggedIn(context, widget.catalog.api)) {
+                return;
+              }
+              try {
+                await widget.catalog.changeFavorite(widget.track);
+              } catch (error) {
+                if (context.mounted) await _showError(context, error);
+              }
+            };
+      final label = liked ? '取消喜欢' : '喜欢这首音乐';
+      final icon = liked ? CupertinoIcons.heart_fill : CupertinoIcons.heart;
+      return widget.bar
+          ? BarButton(
+              label: label,
+              icon: icon,
+              size: 18,
+              selected: liked,
+              onPressed: onPressed,
+            )
+          : ActionButton(
+              label: label,
+              icon: icon,
+              selected: liked,
+              onPressed: onPressed,
+            );
     },
   );
 }
 
 class _PlaylistButton extends StatefulWidget {
-  const _PlaylistButton({required this.catalog, required this.track});
+  const _PlaylistButton({
+    required this.catalog,
+    required this.track,
+    this.bar = false,
+  });
   final Catalog catalog;
   final Track track;
+  final bool bar;
   @override
   State<_PlaylistButton> createState() => _PlaylistButtonState();
 }
@@ -104,21 +139,40 @@ class _PlaylistButtonState extends State<_PlaylistButton> {
   }
 
   @override
-  Widget build(BuildContext context) => ActionButton(
-    label: added == null ? '添加到歌单' : '已加入$added，再添加到其他歌单',
-    icon: added == null
+  Widget build(BuildContext context) {
+    final label = added == null ? '添加到歌单' : '已加入$added，再添加到其他歌单';
+    final icon = added == null
         ? CupertinoIcons.text_badge_plus
-        : CupertinoIcons.check_mark_circled,
-    selected: added != null,
-    onPressed: () async {
+        : CupertinoIcons.check_mark_circled;
+    Future<void> onPressed() async {
+      if (widget.track.mode == MusicMode.netease &&
+          !await ensureLoggedIn(context, widget.catalog.api)) {
+        return;
+      }
+      if (!context.mounted) return;
       final result = await showPlaylistPicker(
         context,
         widget.catalog,
         widget.track,
       );
       if (mounted && result != null) setState(() => added = result);
-    },
-  );
+    }
+
+    return widget.bar
+        ? BarButton(
+            label: label,
+            icon: icon,
+            size: 18,
+            selected: added != null,
+            onPressed: onPressed,
+          )
+        : ActionButton(
+            label: label,
+            icon: icon,
+            selected: added != null,
+            onPressed: onPressed,
+          );
+  }
 }
 
 Future<void> _showError(BuildContext context, Object error) =>

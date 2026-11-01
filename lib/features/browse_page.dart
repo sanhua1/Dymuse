@@ -13,6 +13,7 @@ import 'song_actions.dart';
 import 'search_controls.dart';
 import 'discovery_controls.dart';
 import 'intelligence_page.dart';
+import 'login_required.dart';
 import 'playlist_editor.dart';
 import 'subscription_actions.dart';
 
@@ -297,8 +298,26 @@ class BrowseState extends ChangeNotifier {
 
   Future<void> retry() => load(more: _retryMore);
 
+  /// 游客打开“我喜欢的音乐 / 我的歌单 / 播客”这类依赖网易云账号的页面：不请求，显示登录提示。
+  bool get needsLogin =>
+      catalog.api.guest &&
+      mode == MusicMode.netease &&
+      collection == null &&
+      (section == 'favorites' ||
+          section == 'playlists' ||
+          section.startsWith('podcasts'));
+
   Future<void> load({bool more = false}) async {
     if (_disposed || (more && (loading || page.nextOffset == null))) return;
+    if (needsLogin) {
+      ++_ticket;
+      loading = false;
+      loaded = false;
+      error = null;
+      page = const CatalogPage();
+      notifyListeners();
+      return;
+    }
     final ticket = ++_ticket;
     loading = true;
     error = null;
@@ -731,12 +750,24 @@ class BrowsePage extends StatelessWidget {
                 ),
               ),
             ),
-            if (browser.loading && !browser.loaded)
+            if (browser.needsLogin)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: LoginRequiredView(
+                  api: browser.catalog.api,
+                  title: switch (browser.section) {
+                    'favorites' => '我喜欢的音乐',
+                    'playlists' => '我的歌单',
+                    _ => '播客',
+                  },
+                ),
+              ),
+            if (browser.loading && !browser.loaded && !browser.needsLogin)
               const SliverFillRemaining(
                 hasScrollBody: false,
                 child: Center(child: CupertinoActivityIndicator()),
               ),
-            if (browser.error != null && !browser.loaded)
+            if (browser.error != null && !browser.loaded && !browser.needsLogin)
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: StatusMessage(
@@ -754,7 +785,10 @@ class BrowsePage extends StatelessWidget {
                   ),
                 ),
               ),
-            if (empty && !browser.loading && browser.error == null)
+            if (empty &&
+                !browser.loading &&
+                browser.error == null &&
+                !browser.needsLogin)
               SliverFillRemaining(
                 hasScrollBody: false,
                 child: StatusMessage(
@@ -855,6 +889,7 @@ class BrowsePage extends StatelessWidget {
                       onActivate: () => _activate(block.page.tracks[index]),
                       onFavorite: (liked) =>
                           _favorite(context, block.page.tracks[index], liked),
+                      onOpenCollection: browser.openCollection,
                     ),
                   ),
                 ),
@@ -897,9 +932,7 @@ class BrowsePage extends StatelessWidget {
                     favorite:
                         page.tracks[index].favorite ||
                         browser.section == 'favorites',
-                    onOpenCollection: browser.mode == MusicMode.bilibili
-                        ? browser.openCollection
-                        : null,
+                    onOpenCollection: browser.openCollection,
                   ),
                 ),
               ),
@@ -1584,7 +1617,9 @@ class _TrackRowState extends State<TrackRow> {
 
   /// 打开菜单时顺手确认喜欢状态（网易云），失败不打断。
   void _loadFavoriteState() {
-    if (widget.track.mode == MusicMode.netease && !widget.track.isPodcast) {
+    if (widget.track.mode == MusicMode.netease &&
+        !widget.track.isPodcast &&
+        !widget.api.guest) {
       unawaited(
         widget.playback.catalog.loadFavorite(widget.track).catchError((_) {}),
       );
@@ -1615,7 +1650,12 @@ class _TrackRowState extends State<TrackRow> {
           icon: CupertinoIcons.text_append,
         ),
       if (!widget.track.isPodcast)
-        GlassMenuEntry('添加到歌单', () {
+        GlassMenuEntry('添加到歌单', () async {
+          if (widget.track.mode == MusicMode.netease &&
+              hostContext.mounted &&
+              !await ensureLoggedIn(hostContext, widget.api)) {
+            return;
+          }
           if (hostContext.mounted) {
             showPlaylistPicker(
               hostContext,
@@ -1627,13 +1667,27 @@ class _TrackRowState extends State<TrackRow> {
       if (!widget.track.isPodcast)
         GlassMenuEntry(
           favorite ? '取消喜欢' : '喜欢这首歌',
-          () => widget.onFavorite(favorite),
+          () async {
+            if (widget.track.mode == MusicMode.netease &&
+                hostContext.mounted &&
+                !await ensureLoggedIn(hostContext, widget.api)) {
+              return;
+            }
+            widget.onFavorite(favorite);
+          },
           icon: favorite ? CupertinoIcons.heart_slash : CupertinoIcons.heart,
         ),
       if (widget.track.mode == MusicMode.bilibili &&
           widget.onOpenCollection != null)
         GlassMenuEntry('跳转到…', () {
           if (hostContext.mounted) _jumpToSource(hostContext);
+        }, icon: CupertinoIcons.arrow_turn_down_right),
+      if (widget.track.mode == MusicMode.netease &&
+          !widget.track.isPodcast &&
+          widget.onOpenCollection != null &&
+          _neteaseTargets.isNotEmpty)
+        GlassMenuEntry('跳转到…', () {
+          if (hostContext.mounted) _jumpToNetease(hostContext);
         }, icon: CupertinoIcons.arrow_turn_down_right),
       if (widget.track.mode == MusicMode.bilibili &&
           (widget.track.rawTitle ?? '').isNotEmpty)
@@ -1643,6 +1697,30 @@ class _TrackRowState extends State<TrackRow> {
           }
         }, icon: CupertinoIcons.doc_text),
     ];
+  }
+
+  /// 网易云歌曲可跳转的页面：专辑，以及每位歌手的主页。
+  List<(String, Collection)> get _neteaseTargets {
+    final track = widget.track;
+    return [
+      if (track.albumTarget != null)
+        ('专辑 · ${track.album}', track.albumTarget!),
+      for (final a in track.artists)
+        ('歌手 · ${a.name}', Collection(a.id, a.name, '歌手', null, 'artist')),
+    ];
+  }
+
+  Future<void> _jumpToNetease(BuildContext context) async {
+    final targets = _neteaseTargets;
+    if (targets.isEmpty) return;
+    final picked = targets.length == 1
+        ? targets.first.$2
+        : await showChoiceSheet<Collection>(
+            context,
+            title: '跳转到',
+            choices: targets,
+          );
+    if (picked != null) widget.onOpenCollection?.call(picked);
   }
 
   /// 查出这个视频所属的合集、多 P 视频、UP 主投稿，选一个进入（进入后可添加订阅）。

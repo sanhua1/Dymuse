@@ -1,0 +1,26 @@
+# Dymuse 取链服务：link-service 保存并发放会员账号；ncm-api 是网易云 API，
+# 用来在网页里扫码登录和验证取链（不需要扫码时可以删掉 ncm-api 和下面的 DYMUSE_NETEASE_API）。
+services:
+  link-service:
+    build: .
+    restart: unless-stopped
+    environment:
+      DYMUSE_NETEASE_API: http://ncm-api:3000
+    volumes:
+      - link-data:/data
+    # 只监听本机，对外请放在带 HTTPS 的反向代理后面（见 README）。
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      - ncm-api
+
+  ncm-api:
+    image: moefurina/ncm-api:latest
+    restart: unless-stopped
+    environment:
+      # 关闭“解灰”（第三方音源）：只用你的会员账号取链，也让“验证取链”结果可信。
+      ENABLE_GENERAL_UNBLOCK: "false"
+    # 不发布端口：只有 link-service 能访问它。
+
+volumes:
+  link-data:

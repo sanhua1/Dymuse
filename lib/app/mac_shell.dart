@@ -1036,24 +1036,24 @@ class _PlayerBar extends StatelessWidget {
           return Row(
             children: [
               if (wide)
-                _BarButton(
+                BarButton(
                   label: controller.shuffle ? '关闭随机播放' : '随机播放',
                   icon: CupertinoIcons.shuffle,
-                  size: 15,
+                  size: 16,
                   selected: controller.shuffle,
                   onPressed: controller.snapshot == null
                       ? null
                       : controller.setShuffle,
                 ),
-              _BarButton(
+              BarButton(
                 label: '上一首',
                 icon: CupertinoIcons.backward_fill,
-                size: 19,
+                size: 20,
                 onPressed: empty ? null : controller.previous,
               ),
               ValueListenableBuilder(
                 valueListenable: controller.engine.playing,
-                builder: (_, playing, _) => _BarButton(
+                builder: (_, playing, _) => BarButton(
                   label: playing ? '暂停' : '播放',
                   icon: playing
                       ? CupertinoIcons.pause_fill
@@ -1065,14 +1065,14 @@ class _PlayerBar extends StatelessWidget {
                       : controller.toggle,
                 ),
               ),
-              _BarButton(
+              BarButton(
                 label: '下一首',
                 icon: CupertinoIcons.forward_fill,
-                size: 19,
+                size: 20,
                 onPressed: empty ? null : () => controller.next(),
               ),
               if (wide)
-                _BarButton(
+                BarButton(
                   label: switch (controller.repeat) {
                     'all' => '重复全部',
                     'one' => '单曲重复',
@@ -1081,7 +1081,7 @@ class _PlayerBar extends StatelessWidget {
                   icon: controller.repeat == 'one'
                       ? CupertinoIcons.repeat_1
                       : CupertinoIcons.repeat,
-                  size: 15,
+                  size: 16,
                   selected: controller.repeat != 'off',
                   onPressed: controller.snapshot == null
                       ? null
@@ -1100,27 +1100,41 @@ class _PlayerBar extends StatelessWidget {
                   ),
                 ),
               ),
+              // 喜欢、添加到歌单与右侧各按钮在同一个 Row 里，共用同一条垂直中线。
+              if (controller.error != null)
+                BarButton(
+                  label: '重试播放',
+                  icon: CupertinoIcons.arrow_clockwise,
+                  size: 16,
+                  onPressed: controller.retry,
+                )
+              else
+                SongActions(
+                  catalog: controller.catalog,
+                  track: controller.track,
+                  bar: true,
+                ),
               const SizedBox(width: 12),
-              _BarButton(
+              BarButton(
                 label: '歌词',
                 icon: CupertinoIcons.quote_bubble,
-                size: 17,
+                size: 16,
                 selected: panel == _SidePanel.lyrics,
                 onPressed: onLyrics,
               ),
-              _BarButton(
+              BarButton(
                 label: '播放队列',
                 icon: CupertinoIcons.list_bullet,
-                size: 17,
+                size: 24,
                 selected: panel == _SidePanel.queue,
                 onPressed: onQueue,
               ),
               LyricLayerMenu(
                 visible: panel == _SidePanel.lyrics,
-                builder: (context, open, active) => _BarButton(
+                builder: (context, open, active) => BarButton(
                   label: '歌词翻译',
                   icon: CupertinoIcons.globe,
-                  size: 17,
+                  size: 18,
                   selected: active,
                   onPressed: open,
                 ),
@@ -1129,12 +1143,12 @@ class _PlayerBar extends StatelessWidget {
                 const SizedBox(width: 6),
                 // 固定宽度：静音与普通图标宽度不同，滑条不随之跳动；与滑条留出间距。
                 SizedBox(
-                  width: 20,
+                  width: 22,
                   child: Icon(
                     controller.volume == 0
                         ? CupertinoIcons.speaker_slash_fill
                         : CupertinoIcons.speaker_2_fill,
-                    size: 14,
+                    size: 20,
                     color: DymuseTokens.secondary(context),
                   ),
                 ),
@@ -1154,90 +1168,6 @@ class _PlayerBar extends StatelessWidget {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-/// 播放条按钮：无底色方块，悬停加深图标、按下变淡；开启状态为强调色与浅圆底。
-class _BarButton extends StatefulWidget {
-  const _BarButton({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-    this.size = 18,
-    this.selected = false,
-    this.loading = false,
-  });
-  final String label;
-  final IconData icon;
-  final VoidCallback? onPressed;
-  final double size;
-  final bool selected, loading;
-  @override
-  State<_BarButton> createState() => _BarButtonState();
-}
-
-class _BarButtonState extends State<_BarButton> {
-  bool hover = false, pressed = false, focus = false;
-  @override
-  Widget build(BuildContext context) {
-    final enabled = widget.onPressed != null;
-    final tint = DymuseTokens.tint(context);
-    final ink = DymuseTokens.ink(context);
-    final color = !enabled
-        ? DymuseTokens.secondary(context).withValues(alpha: .45)
-        : widget.selected
-        ? tint
-        : ink.withValues(alpha: hover ? 1 : .82);
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      selected: widget.selected,
-      label: widget.label,
-      excludeSemantics: true,
-      child: FocusableActionDetector(
-        enabled: enabled,
-        mouseCursor: SystemMouseCursors.basic,
-        onShowHoverHighlight: (value) => setState(() => hover = value),
-        onShowFocusHighlight: (value) => setState(() => focus = value),
-        actions: {
-          ActivateIntent: CallbackAction<ActivateIntent>(
-            onInvoke: (_) {
-              widget.onPressed?.call();
-              return null;
-            },
-          ),
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: enabled ? (_) => setState(() => pressed = true) : null,
-          onTapCancel: () => setState(() => pressed = false),
-          onTapUp: (_) => setState(() => pressed = false),
-          onTap: widget.onPressed,
-          child: Container(
-            width: widget.size + 20,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: widget.selected
-                  ? tint.withValues(alpha: .14)
-                  : const Color(0x00000000),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: focus ? tint : const Color(0x00000000),
-                width: 2,
-              ),
-            ),
-            child: widget.loading
-                ? const CupertinoActivityIndicator(radius: 8)
-                : AnimatedOpacity(
-                    opacity: pressed ? .45 : 1,
-                    duration: const Duration(milliseconds: 80),
-                    child: Icon(widget.icon, size: widget.size, color: color),
-                  ),
-          ),
-        ),
       ),
     );
   }
@@ -1317,15 +1247,6 @@ class _NowPlaying extends StatelessWidget {
             ],
           ),
         ),
-        if (controller.error != null)
-          _BarButton(
-            label: '重试播放',
-            icon: CupertinoIcons.arrow_clockwise,
-            size: 15,
-            onPressed: controller.retry,
-          )
-        else
-          SongActions(catalog: controller.catalog, track: track),
       ],
     );
   }

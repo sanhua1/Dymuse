@@ -143,7 +143,7 @@ class _TitleRulesPanelState extends State<TitleRulesPanel> {
               ),
             ),
           const SizedBox(height: 8),
-          ActionButton(label: '添加规则', onPressed: () => edit(null)),
+          PanelButton(label: '添加规则', onPressed: () => edit(null)),
           const SizedBox(height: 20),
           const Text(
             '试一试',

@@ -13,6 +13,7 @@ import 'core/media_cache.dart';
 import 'core/session.dart';
 import 'design_system/tokens.dart';
 import 'features/catalog.dart';
+import 'link_service/link_service.dart';
 import 'platform/desktop_window.dart';
 import 'platform/now_playing.dart';
 import 'playback/audio_engine.dart';
@@ -60,19 +61,33 @@ Future<void> main() async {
     preferences.getString('audioQuality'),
   );
   if (justAudio) NowPlaying(playback);
-  final appearance = Appearance(
-    brightness: switch (preferences.getString('appearance')) {
-      'light' => Brightness.light,
-      'dark' => Brightness.dark,
-      _ => null,
-    },
-    // 除 Windows 外跟随系统辅助功能设置，不读应用内旧开关（设置页也不再显示）。
-    reduceTransparency:
-        !justAudio && (preferences.getBool('reduceTransparency') ?? false),
-    reduceMotion: !justAudio && (preferences.getBool('reduceMotion') ?? false),
-  )..applyAccent(preferences.getString('accent'));
+  final appearance =
+      Appearance(
+          brightness: switch (preferences.getString('appearance')) {
+            'light' => Brightness.light,
+            'dark' => Brightness.dark,
+            _ => null,
+          },
+          // 除 Windows 外跟随系统辅助功能设置，不读应用内旧开关（设置页也不再显示）。
+          reduceTransparency:
+              !justAudio &&
+              (preferences.getBool('reduceTransparency') ?? false),
+          reduceMotion:
+              !justAudio && (preferences.getBool('reduceMotion') ?? false),
+        )
+        ..applyAccent(preferences.getString('accent'))
+        ..miniProgress = preferences.getBool('miniProgress') ?? true
+        ..miniProgressShown = preferences.getBool('miniProgress') ?? true;
   final sync = SyncService(preferences);
   session.sync = sync;
+  final linkService = LinkService();
+  session.linkService = linkService;
+  unawaited(
+    linkService.start().then((_) {
+      session.linkServiceChanged();
+      linkService.addListener(session.linkServiceChanged);
+    }),
+  );
   session.onTitleRules = catalog.syncApplied;
   sync
     ..readCredentials = session.syncCredentials

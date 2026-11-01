@@ -5,6 +5,20 @@ import '../core/api_client.dart';
 import '../core/artwork_image.dart';
 import 'tokens.dart';
 
+/// 底部 Tab 栏的玻璃参数（取自 liquid_glass_widgets 的 kBottomBarGlassDefaults）。
+/// 迷你播放器用同一组参数，两者看起来才是同一种玻璃。
+const kBarGlassSettings = glass.LiquidGlassSettings(
+  thickness: 30,
+  blur: 3,
+  chromaticAberration: 0.3,
+  lightIntensity: 0.6,
+  refractiveIndex: 1.59,
+  saturation: 0.7,
+  ambientStrength: 1,
+  lightAngle: 0.75 * 3.141592653589793,
+  glassColor: Color(0x3DFFFFFF),
+);
+
 /// 第三方材质只从此处进入业务 UI；内容列表不创建玻璃层。
 class GlassPanel extends StatelessWidget {
   const GlassPanel({
@@ -13,8 +27,12 @@ class GlassPanel extends StatelessWidget {
     this.padding = EdgeInsets.zero,
     this.radius = 22,
     this.lightweight = false,
+    this.settings,
   });
   final Widget child;
+
+  /// 自定义玻璃参数（例如与底部 Tab 栏一致）；null 沿用全局主题。
+  final glass.LiquidGlassSettings? settings;
   final EdgeInsets padding;
   final double radius;
 
@@ -43,6 +61,7 @@ class GlassPanel extends StatelessWidget {
           : DymuseTokens.glassQuality,
       shape: glass.LiquidRoundedSuperellipse(borderRadius: radius),
       useOwnLayer: true,
+      settings: DymuseTokens.android ? null : settings,
       padding: padding,
       child: child,
     );
@@ -391,7 +410,16 @@ class GlassPillButton extends StatelessWidget {
     this.prominent = false,
     this.selected = false,
     this.busy = false,
+    this.compact = false,
+    this.flat = false,
   });
+
+  /// 设置页等面板内的小号胶囊（高 36）。
+  final bool compact;
+
+  /// 不用实时玻璃着色器，改画静态的玻璃质感（半透明底 + 高光描边）。
+  /// 用于会滚动的长页面：每个实时玻璃按钮滚动时都要逐帧重绘。
+  final bool flat;
 
   /// 语义标签；[text] 为空时也作为可见文字。
   final String label;
@@ -399,6 +427,42 @@ class GlassPillButton extends StatelessWidget {
   final IconData? icon;
   final VoidCallback? onPressed;
   final bool prominent, selected, busy;
+
+  Widget _pillSurface(
+    BuildContext context, {
+    required double radius,
+    required EdgeInsets padding,
+    required Widget child,
+  }) {
+    if (!flat) {
+      return GlassPanel(
+        lightweight: true,
+        radius: radius,
+        padding: padding,
+        child: child,
+      );
+    }
+    final dark = DymuseTokens.dark(context);
+    final base = dark ? const Color(0xFFFFFFFF) : const Color(0xFF000000);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            base.withValues(alpha: dark ? .18 : .09),
+            base.withValues(alpha: dark ? .10 : .05),
+          ],
+        ),
+        border: Border.all(
+          color: const Color(0xFFFFFFFF).withValues(alpha: dark ? .22 : .7),
+        ),
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = prominent || selected
@@ -417,12 +481,12 @@ class GlassPillButton extends StatelessWidget {
         onPressed: enabled ? onPressed : null,
         child: Opacity(
           opacity: onPressed == null && !busy ? .45 : 1,
-          child: GlassPanel(
-            lightweight: true,
-            radius: 22,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _pillSurface(
+            context,
+            radius: compact ? 18 : 22,
+            padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 20),
             child: SizedBox(
-              height: 44,
+              height: compact ? 36 : 44,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -436,7 +500,7 @@ class GlassPillButton extends StatelessWidget {
                     Text(
                       text ?? label,
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: compact ? 14 : 16,
                         fontWeight: FontWeight.w600,
                         color: color,
                       ),
@@ -449,6 +513,36 @@ class GlassPillButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 设置面板里的按钮：Liquid Glass 平台用小号玻璃胶囊（轻量档，Android 同样省电），Windows 保持 ActionButton。
+class PanelButton extends StatelessWidget {
+  const PanelButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.prominent = false,
+  });
+  final String label;
+  final VoidCallback? onPressed;
+  final IconData? icon;
+  final bool prominent;
+  @override
+  Widget build(BuildContext context) => DymuseTokens.liquid
+      ? GlassPillButton(
+          label: label,
+          icon: icon,
+          prominent: prominent,
+          compact: true,
+          onPressed: onPressed,
+        )
+      : ActionButton(
+          label: label,
+          icon: icon,
+          filled: prominent,
+          onPressed: onPressed,
+        );
 }
 
 /// 列表行里悬停时的播放/暂停图标，32×32 点击区域，无自身底板。
@@ -627,8 +721,14 @@ class GlassPopupMenu extends StatefulWidget {
     this.width = 200,
     this.onOpen,
     this.controller,
+    this.glassTrigger = false,
   });
   final GlassPopupController? controller;
+
+  /// 触发控件本身是玻璃按钮时为 true：菜单从它“长”出来再融回去。
+  /// 触发控件是普通图标或整行内容时为 false：菜单从触发点中心展开、收回，
+  /// 不画一个凭空出现又消失的玻璃圆点（那就是收回时“闪一下”的来源）。
+  final bool glassTrigger;
   final Widget Function(BuildContext context, VoidCallback open) builder;
   final List<GlassMenuEntry> entries;
   final double width;
@@ -643,8 +743,37 @@ class _GlassPopupMenuState extends State<GlassPopupMenu> {
   late final _own = glass.GlassMenuController();
   glass.GlassMenuController get _controller => widget.controller ?? _own;
 
+  /// 菜单打开期间（含收回动画）固定使用打开时的菜单项：
+  /// 点选项会让页面状态变化并重建菜单，项目数、勾选一变，收回中的菜单就会跳变。
+  List<GlassMenuEntry>? _frozen;
+
+  void _freeze(List<GlassMenuEntry> entries) {
+    if (_frozen != null) return;
+    _frozen = entries;
+    _thawWhenClosed();
+  }
+
+  void _thawWhenClosed() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_controller.isOpen) {
+        _thawWhenClosed();
+      } else if (_frozen != null) {
+        setState(() => _frozen = null);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(GlassPopupMenu oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 从外部（控制器）打开的菜单，也在内容变化前固定住。
+    if (_controller.isOpen) _freeze(oldWidget.entries);
+  }
+
   void _open() {
     widget.onOpen?.call();
+    _freeze(widget.entries);
     _controller.open();
   }
 
@@ -653,11 +782,12 @@ class _GlassPopupMenuState extends State<GlassPopupMenu> {
     controller: _controller,
     // 手机沿用触控尺寸；桌面按 macOS 菜单的 13pt 字号与紧凑行高。
     menuWidth: DymuseTokens.mobile ? widget.width : widget.width * .85,
+    morphFromZero: !widget.glassTrigger,
     autoAdjustToScreen: true,
     menuPadding: EdgeInsets.all(DymuseTokens.mobile ? 12 : 6),
     quality: DymuseTokens.glassQuality,
     items: [
-      for (final entry in widget.entries)
+      for (final entry in _frozen ?? widget.entries)
         glass.GlassMenuItem(
           title: entry.label,
           isDestructive: entry.destructive,
@@ -824,3 +954,87 @@ Future<T?> showChoiceSheet<T>(
     );
   },
 );
+
+/// 播放条按钮：无底色方块，悬停加深图标、按下变淡；开启状态为强调色与浅圆底。
+class BarButton extends StatefulWidget {
+  const BarButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.size = 18,
+    this.selected = false,
+    this.loading = false,
+  });
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final double size;
+  final bool selected, loading;
+  @override
+  State<BarButton> createState() => BarButtonState();
+}
+
+class BarButtonState extends State<BarButton> {
+  bool hover = false, pressed = false, focus = false;
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null;
+    final tint = DymuseTokens.tint(context);
+    final ink = DymuseTokens.ink(context);
+    final color = !enabled
+        ? DymuseTokens.secondary(context).withValues(alpha: .45)
+        : widget.selected
+        ? tint
+        : ink.withValues(alpha: hover ? 1 : .82);
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      selected: widget.selected,
+      label: widget.label,
+      excludeSemantics: true,
+      child: FocusableActionDetector(
+        enabled: enabled,
+        mouseCursor: SystemMouseCursors.basic,
+        onShowHoverHighlight: (value) => setState(() => hover = value),
+        onShowFocusHighlight: (value) => setState(() => focus = value),
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onPressed?.call();
+              return null;
+            },
+          ),
+        },
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: enabled ? (_) => setState(() => pressed = true) : null,
+          onTapCancel: () => setState(() => pressed = false),
+          onTapUp: (_) => setState(() => pressed = false),
+          onTap: widget.onPressed,
+          child: Container(
+            width: widget.size + 20,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: widget.selected
+                  ? tint.withValues(alpha: .14)
+                  : const Color(0x00000000),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: focus ? tint : const Color(0x00000000),
+                width: 2,
+              ),
+            ),
+            child: widget.loading
+                ? const CupertinoActivityIndicator(radius: 8)
+                : AnimatedOpacity(
+                    opacity: pressed ? .45 : 1,
+                    duration: const Duration(milliseconds: 80),
+                    child: Icon(widget.icon, size: widget.size, color: color),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}

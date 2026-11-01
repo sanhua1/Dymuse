@@ -202,7 +202,10 @@ class LocalBackend {
           return client.recommendSongs();
         }
         if (segments.length > 1 && segments[1] == 'resource') {
-          return client.recommendResource();
+          // 个性化推荐需要账号；没登录时给公开的推荐歌单。
+          return client.loggedIn
+              ? client.recommendResource()
+              : client.personalizedPlaylists();
         }
         break;
       case 'user':

@@ -246,24 +246,43 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                           ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Column(
+                            children: [
+                              Center(
+                                child: ActionButton(
+                                  label: '先不登录，直接使用',
+                                  onPressed: () =>
+                                      unawaited(widget.session.enterGuest()),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '不登录也能搜索、浏览和播放；红心、我的歌单、推荐等功能需要登录。',
+                                textAlign: TextAlign.center,
+                                style: DymuseTokens.caption.copyWith(
+                                  color: DymuseTokens.secondary(context),
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         if (widget.session.sync != null)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
                             child: Center(
                               child: ActionButton(
                                 label: '已有同步？用 WebDAV 恢复登录',
-                                onPressed: () => showSyncForm(
-                                  context,
-                                  widget.session.sync!,
-                                ),
+                                onPressed: () =>
+                                    showSyncForm(context, widget.session.sync!),
                               ),
                             ),
                           ),
                         const SizedBox(height: 8),
                         Text(
-                          _expiresAt == null
-                              ? ''
-                              : '二维码约 2 分钟有效，过期后点按二维码刷新。',
+                          _expiresAt == null ? '' : '二维码约 2 分钟有效，过期后点按二维码刷新。',
                           style: DymuseTokens.caption.copyWith(
                             color: DymuseTokens.secondary(context),
                           ),

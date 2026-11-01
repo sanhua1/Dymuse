@@ -3,11 +3,11 @@ import '../design_system/tokens.dart';
 /// 全局音质：网易云的五个常用档位，从低到高排列。
 /// [detailKey] 是 `/song/music/detail` 里该档位对应的字段，值为 null 表示这首歌没有该档位。
 enum AudioQuality {
-  standard('standard', 'l', '标准', '128 kbps，最省流量'),
-  higher('higher', 'm', '较高', '192 kbps'),
-  exhigh('exhigh', 'h', '极高', '320 kbps'),
-  lossless('lossless', 'sq', '无损', 'FLAC，流量较大'),
-  hires('hires', 'hr', 'Hi-Res', '高解析度无损，流量最大');
+  standard('standard', 'l', '标准', '128K'),
+  higher('higher', 'm', '较高', '192K'),
+  exhigh('exhigh', 'h', '极高', '320K'),
+  lossless('lossless', 'sq', '无损', 'FLAC'),
+  hires('hires', 'hr', 'Hi-Res', 'FLAC 高解析度');
 
   const AudioQuality(this.level, this.detailKey, this.label, this.hint);
   final String level, detailKey, label, hint;

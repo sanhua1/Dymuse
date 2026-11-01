@@ -20,14 +20,30 @@ class NeteaseError implements Exception {
 }
 
 class NeteaseClient {
-  NeteaseClient({Map<String, String>? cookie, this.onCookie, this.antiCheat})
-    : cookie = {...?cookie} {
+  NeteaseClient({
+    Map<String, String>? cookie,
+    this.onCookie,
+    this.antiCheat,
+    this.vipCookie,
+    this.onVipExpired,
+    this.eapiHost = 'https://interfacepc.music.163.com',
+    this.weapiHost = 'https://music.163.com',
+  }) : cookie = {...?cookie} {
     this.cookie.putIfAbsent('deviceId', () => _newDeviceId);
   }
 
   /// 登录态 Cookie（MUSIC_U、__csrf、NMTID、deviceId 等），由会话持久化。
   final Map<String, String> cookie;
   final void Function(Map<String, String> cookie)? onCookie;
+
+  /// 定制版：取链用的账号 Cookie（来自定制服务）。为 null 时取链沿用自己的账号。
+  final Map<String, String>? Function()? vipCookie;
+
+  /// 取链账号被网易云判为失效时调用，用来向定制服务重新拉取。
+  final Future<void> Function()? onVipExpired;
+
+  /// 接口主机；只有测试会改。
+  final String eapiHost, weapiHost;
 
   /// 易盾反作弊令牌生成器（需要浏览器环境，由界面层提供）；没有时请求不带令牌。
   final Future<String> Function()? antiCheat;
@@ -46,8 +62,6 @@ class NeteaseClient {
   static const _weapiUa =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0';
-  static const _eapiHost = 'https://interfacepc.music.163.com';
-  static const _weapiHost = 'https://music.163.com';
 
   bool get loggedIn => (cookie['MUSIC_U'] ?? '').isNotEmpty;
   String get userId => cookie['userId'] ?? '';
@@ -63,13 +77,13 @@ class NeteaseClient {
   ).join();
 
   // 与 request.js 的 processCookieObject 一致。
-  Map<String, String> _processed(Crypto crypto) => {
-    ...cookie,
+  Map<String, String> _processed(Crypto crypto, Map<String, String> source) => {
+    ...source,
     '__remember_me': 'true',
     'ntes_kaola_ad': '1',
     for (final entry in _os.entries)
-      entry.key: cookie[entry.key] ?? entry.value,
-    if (cookie['NMTID'] == null && crypto == Crypto.weapi)
+      entry.key: source[entry.key] ?? entry.value,
+    if (source['NMTID'] == null && crypto == Crypto.weapi)
       'NMTID': '00O${_hexRandom(19)}',
   };
 
@@ -98,16 +112,19 @@ class NeteaseClient {
     Map<String, Object?> data, {
     Crypto crypto = Crypto.eapi,
     bool checkToken = false,
+
+    /// 只对这一次请求改用另一份 Cookie（取链账号）；响应里的 Set-Cookie 不写回本机会话。
+    Map<String, String>? cookieOverride,
   }) async {
     final token = checkToken ? await antiCheat?.call() ?? '' : '';
-    final c = _processed(crypto);
+    final c = _processed(crypto, cookieOverride ?? cookie);
     final body = <String, Object?>{...data, 'e_r': false};
     final Uri url;
     final headers = <String, String>{};
     final Map<String, String> form;
     if (crypto == Crypto.weapi) {
-      url = Uri.parse('$_weapiHost/weapi/${uri.substring(5)}');
-      headers['Referer'] = _weapiHost;
+      url = Uri.parse('$weapiHost/weapi/${uri.substring(5)}');
+      headers['Referer'] = weapiHost;
       headers['User-Agent'] = _weapiUa;
       headers['Cookie'] = _join(c);
       body['csrf_token'] = c['__csrf'] ?? '';
@@ -131,13 +148,13 @@ class NeteaseClient {
         if (c['NMTID'] != null) 'NMTID': c['NMTID']!,
         if (checkToken && token.isNotEmpty) 'X-antiCheatToken': token,
       };
-      url = Uri.parse('$_eapiHost/eapi/${uri.substring(5)}');
+      url = Uri.parse('$eapiHost/eapi/${uri.substring(5)}');
       headers['User-Agent'] = _eapiUa;
       headers['Cookie'] = _join(header);
       body['header'] = header;
       form = enc.eapi(uri, body);
     }
-    final text = await _post(url, headers, form);
+    final text = await _post(url, headers, form, save: cookieOverride == null);
     final Object? json;
     try {
       json = jsonDecode(text);
@@ -167,8 +184,9 @@ class NeteaseClient {
   Future<String> _post(
     Uri url,
     Map<String, String> headers,
-    Map<String, String> form,
-  ) async {
+    Map<String, String> form, {
+    bool save = true,
+  }) async {
     Future<String> once() async {
       final req = await _http.postUrl(url);
       try {
@@ -180,7 +198,9 @@ class NeteaseClient {
         );
         req.write(Uri(queryParameters: form).query);
         final res = await req.close();
-        _saveCookies(res.headers[HttpHeaders.setCookieHeader] ?? const []);
+        if (save) {
+          _saveCookies(res.headers[HttpHeaders.setCookieHeader] ?? const []);
+        }
         final text = await utf8.decodeStream(res);
         if (res.statusCode != 200) {
           throw NeteaseError(
@@ -326,6 +346,29 @@ class NeteaseClient {
   Future<Map<String, dynamic>> recommendResource() =>
       request('/api/v1/discovery/recommend/resource', {}, crypto: Crypto.weapi);
 
+  /// 推荐歌单（公开接口，不登录也能用）；游客的“推荐”页用它代替需要账号的个性化推荐。
+  /// 返回与 [recommendResource] 相同的形状：`{code, recommend: [{id, name, picUrl, trackCount}]}`。
+  Future<Map<String, dynamic>> personalizedPlaylists({int limit = 30}) async {
+    final body = await request('/api/personalized/playlist', {
+      'limit': limit,
+      'total': true,
+      'n': 1000,
+    }, crypto: Crypto.weapi);
+    return {
+      'code': 200,
+      'recommend': [
+        for (final item in (body['result'] as List? ?? const []))
+          if (item is Map)
+            {
+              'id': item['id'],
+              'name': item['name'],
+              'picUrl': item['picUrl'],
+              'trackCount': item['trackCount'],
+            },
+      ],
+    };
+  }
+
   Future<Map<String, dynamic>> personalFm() =>
       request('/api/v1/radio/get', {}, crypto: Crypto.weapi);
 
@@ -418,11 +461,9 @@ class NeteaseClient {
   Future<Map<String, dynamic>> playlistSubscribe(
     String id, {
     required bool subscribed,
-  }) => request(
-    '/api/playlist/${subscribed ? 'subscribe' : 'unsubscribe'}',
-    {'id': id},
-    checkToken: true,
-  );
+  }) => request('/api/playlist/${subscribed ? 'subscribe' : 'unsubscribe'}', {
+    'id': id,
+  }, checkToken: true);
 
   Future<Map<String, dynamic>> playlistAddTracks(
     String pid,
@@ -456,11 +497,38 @@ class NeteaseClient {
     String level = 'exhigh',
   }) async {
     final list = ids.toList();
-    final body = await request('/api/song/enhance/player/url/v1', {
-      'ids': jsonEncode(list),
-      'level': level,
-      'encodeType': 'flac',
-    });
+    Future<Map<String, dynamic>> fetch(Map<String, String>? vip) => request(
+      '/api/song/enhance/player/url/v1',
+      {'ids': jsonEncode(list), 'level': level, 'encodeType': 'flac'},
+      cookieOverride: vip == null
+          ? null
+          : {...vip, 'deviceId': cookie['deviceId']!},
+    );
+    final vip = vipCookie?.call();
+    final Map<String, dynamic> body;
+    if (vip == null) {
+      body = await fetch(null);
+    } else {
+      Map<String, dynamic>? got;
+      try {
+        got = await fetch(vip);
+      } on NeteaseError catch (e) {
+        if (e.code != 'NETEASE_SESSION_EXPIRED') rethrow;
+      }
+      if (got == null) {
+        // 取链账号失效：向定制服务取一次最新的再试；仍不行就退回使用者自己的账号。
+        await onVipExpired?.call();
+        final fresh = vipCookie?.call();
+        if (fresh != null && fresh['MUSIC_U'] != vip['MUSIC_U']) {
+          try {
+            got = await fetch(fresh);
+          } on NeteaseError catch (e) {
+            if (e.code != 'NETEASE_SESSION_EXPIRED') rethrow;
+          }
+        }
+      }
+      body = got ?? await fetch(null);
+    }
     final data = (body['data'] as List? ?? []).toList();
     data.sort(
       (a, b) =>

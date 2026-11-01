@@ -33,11 +33,11 @@ class SyncPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '把登录凭证、B 站红心/歌单/订阅和播放进度同步到你自己的 WebDAV 空间，在多台设备之间保持一致。',
+              '把登录凭证、取链服务配置、B 站红心/歌单/订阅和播放进度同步到你自己的 WebDAV 空间，在多台设备之间保持一致。',
               style: caption,
             ),
             const SizedBox(height: 12),
-            ActionButton(
+            PanelButton(
               label: '设置 WebDAV 同步',
               onPressed: () => showSyncForm(context, sync),
             ),
@@ -72,16 +72,16 @@ class SyncPanel extends StatelessWidget {
             spacing: 10,
             runSpacing: 8,
             children: [
-              ActionButton(
+              PanelButton(
                 label: '立即同步',
                 icon: CupertinoIcons.arrow_2_circlepath,
                 onPressed: syncing ? null : () => unawaited(sync.sync()),
               ),
-              ActionButton(
+              PanelButton(
                 label: '修改设置',
                 onPressed: () => showSyncForm(context, sync),
               ),
-              ActionButton(
+              PanelButton(
                 label: '断开',
                 onPressed: () async {
                   final sure = await showCupertinoDialog<bool>(

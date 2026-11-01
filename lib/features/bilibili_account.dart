@@ -192,7 +192,7 @@ class _BilibiliAccountPanelState extends State<BilibiliAccountPanel> {
                   ],
                 ),
               ),
-              ActionButton(label: '退出登录', onPressed: busy ? null : _logout),
+              PanelButton(label: '退出登录', onPressed: busy ? null : _logout),
             ],
           )
         else ...[
@@ -205,7 +205,7 @@ class _BilibiliAccountPanelState extends State<BilibiliAccountPanel> {
                 ),
               ),
               if (qrUrl == null || status == 86038)
-                ActionButton(label: '扫码登录', onPressed: busy ? null : _startQr),
+                PanelButton(label: '扫码登录', onPressed: busy ? null : _startQr),
             ],
           ),
           if (qrUrl != null) ...[

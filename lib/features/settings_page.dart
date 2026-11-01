@@ -10,6 +10,7 @@ import '../platform/desktop_window.dart';
 import '../playback/playback_controller.dart';
 import 'accent_picker.dart';
 import 'bilibili_account.dart';
+import 'link_service_settings.dart';
 import 'sync_settings.dart';
 import 'title_rules_panel.dart';
 
@@ -20,7 +21,11 @@ class SettingsPage extends StatefulWidget {
     required this.appearance,
     required this.playback,
     this.window,
+    this.topInset = 0,
   });
+
+  /// 顶部为悬浮栏让出的高度（手机上的设置 Sheet 用）。
+  final double topInset;
   final DesktopWindow? window;
   final Session session;
   final Appearance appearance;
@@ -83,49 +88,81 @@ class _SettingsPageState extends State<SettingsPage> {
       return ListView(
         padding: EdgeInsets.fromLTRB(
           32,
-          32,
+          32 + widget.topInset,
           32,
           32 + MediaQuery.paddingOf(context).bottom,
         ),
         children: [
           const Text('设置', style: DymuseTokens.heading),
-          const SizedBox(height: 8),
-          Text(
-            '让音乐按你的方式呈现。',
-            style: TextStyle(color: DymuseTokens.secondary(context)),
-          ),
           const SizedBox(height: 28),
+          _group('网易云'),
           _section('网易云账号', [
-            Row(
-              children: [
-                Artwork(
-                  url: session.avatarUrl.isEmpty ? null : session.avatarUrl,
-                  size: 50,
-                  seed: name,
-                  radius: 25,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            if (session.guest)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        '${_vipLabel(session.vipType)} · 登录只保存在这台设备',
-                        style: DymuseTokens.caption.copyWith(
-                          color: DymuseTokens.secondary(context),
+                      Artwork(url: null, size: 44, seed: name, radius: 22),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Text(
+                          '游客',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                ),
-                ActionButton(label: '退出登录', onPressed: busy ? null : signOut),
-              ],
-            ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '没有登录网易云账号。请登录网易云账号之后使用红心、我的歌单等功能。',
+                    style: DymuseTokens.caption.copyWith(
+                      color: DymuseTokens.secondary(context),
+                      height: 1.6,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  PanelButton(
+                    label: '登录网易云账号',
+                    prominent: true,
+                    onPressed: () => unawaited(session.startLogin()),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Artwork(
+                    url: session.avatarUrl.isEmpty ? null : session.avatarUrl,
+                    size: 50,
+                    seed: name,
+                    radius: 25,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          '${_vipLabel(session.vipType)} · 登录只保存在这台设备',
+                          style: DymuseTokens.caption.copyWith(
+                            color: DymuseTokens.secondary(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PanelButton(label: '退出登录', onPressed: busy ? null : signOut),
+                ],
+              ),
             const SizedBox(height: 12),
             Text(
               '歌曲、歌单、推荐和播放都直接连接网易云，不经过任何中转服务器。',
@@ -135,6 +172,18 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ]),
+          if (session.linkService != null)
+            _section('取链服务', [LinkServicePanel(service: session.linkService!)]),
+          _section(
+            '网易云音质',
+            [
+              for (final quality in AudioQuality.values.reversed)
+                _qualityRow(quality),
+            ],
+            info:
+                '只作用于网易云歌曲，B 站歌曲不受影响。所选档位不存在时自动降到这首歌可用的最高档；无损与 Hi-Res 需要会员，账号没有权限时由网易云降级。',
+          ),
+          _group('B 站'),
           _section('B 站账号', [
             BilibiliAccountPanel(api: session.api, session: session),
           ]),
@@ -142,13 +191,12 @@ class _SettingsPageState extends State<SettingsPage> {
             'B 站歌名正则',
             [TitleRulesPanel(session: session)],
             info:
-                '很多 B 站视频标题带有【】、序号、夸张的宣传语，真正的歌名藏在里面。'
-                '开启后显示识别出的歌名（默认取《》里的内容，并内置了一批常见 UP 主的规则）；关闭则显示原标题。\n\n'
+                'B 站视频标题里常带有【】、序号、宣传语，真正的歌名藏在里面。'
+                'Dymuse 内置了一批正则规则，会从视频标题里识别出歌名；关闭则显示原标题。\n\n'
                 '“订阅内正则”作用于订阅、红心和歌单，默认开启；“搜索结果正则”作用于全 B 站搜索结果，默认关闭。\n\n'
                 '自定义规则优先于内置规则。在列表的“···”菜单里随时可以查看原视频名。',
           ),
-          if (session.sync != null)
-            _section('WebDAV 同步', [SyncPanel(sync: session.sync!)]),
+          _group('通用'),
           _section('外观', [
             _setting(
               '配色',
@@ -173,6 +221,41 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 18),
             _setting('主题色', _AccentPicker(appearance: appearance)),
+            if (DymuseTokens.mobile) ...[
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('迷你播放器显示进度条', style: DymuseTokens.body),
+                        const SizedBox(height: 2),
+                        Text(
+                          '在底部小播放窗口里显示可拖动的播放进度。',
+                          style: DymuseTokens.caption.copyWith(
+                            color: DymuseTokens.secondary(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  CupertinoSwitch(
+                    value: appearance.miniProgress,
+                    onChanged: (value) {
+                      appearance.setMiniProgress(value);
+                      unawaited(
+                        widget.session.preferences.setBool(
+                          'miniProgress',
+                          value,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ],
           ]),
           if (DymuseTokens.macOS && widget.window != null)
             _section(
@@ -199,15 +282,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   '开启后，按 ⌘W 或点红色按钮关闭窗口时，程序坞图标会隐藏，只在屏幕顶部菜单栏留下一个图标，音乐继续播放。'
                   '点菜单栏图标重新打开窗口；右键图标可选择退出。',
             ),
-          _section(
-            '音质',
-            [
-              for (final quality in AudioQuality.values.reversed)
-                _qualityRow(quality),
-            ],
-            info:
-                '对所有歌曲生效。所选档位不存在时自动降到这首歌可用的最高档；无损与 Hi-Res 需要会员，账号没有权限时由网易云降级。',
-          ),
+          if (session.sync != null)
+            _section('WebDAV 同步', [SyncPanel(sync: session.sync!)]),
           if (cache != null)
             _section(
               '缓存',
@@ -284,15 +360,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(quality.label, style: DymuseTokens.body),
-                    Text(
-                      quality.hint,
-                      style: DymuseTokens.caption.copyWith(
-                        color: DymuseTokens.secondary(context),
-                      ),
-                    ),
-                  ],
+                  children: [Text(quality.label, style: DymuseTokens.body)],
                 ),
               ),
               if (selected)
@@ -321,6 +389,11 @@ class _SettingsPageState extends State<SettingsPage> {
     await cache!.setLimit(group, picked);
     await refreshUsage();
   }
+
+  Widget _group(String title) => Padding(
+    padding: const EdgeInsets.only(bottom: 14, top: 4),
+    child: Text(title, style: DymuseTokens.heading.copyWith(fontSize: 22)),
+  );
 
   Widget _section(String title, List<Widget> children, {String? info}) =>
       Padding(
@@ -378,6 +451,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 10),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
                 color: DymuseTokens.surface(context),

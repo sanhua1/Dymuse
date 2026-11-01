@@ -404,6 +404,7 @@ class Catalog extends ChangeNotifier {
   Future<void> loadFavorite(Track track) async {
     _prepareFavorites();
     if (track.isPodcast || _favorites.containsKey(_key(track))) return;
+    if (track.mode == MusicMode.netease && api.guest) return;
     final session = api.token, epoch = _favoriteEpoch;
     try {
       bool value;

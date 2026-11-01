@@ -3,6 +3,7 @@ import '../core/api_client.dart';
 import '../design_system/components.dart';
 import '../design_system/tokens.dart';
 import 'catalog.dart';
+import 'login_required.dart';
 
 /// 编辑器与玻璃背景分层，光标重绘不进入玻璃内容子树。
 class DymuseSearchField extends StatelessWidget {
@@ -267,6 +268,7 @@ class PlaylistSubscriptionButton extends StatelessWidget {
             final toggle = busy
                 ? null
                 : () async {
+                    if (!await ensureLoggedIn(context, catalog.api)) return;
                     try {
                       await catalog.changeSubscription(collection);
                     } catch (error) {

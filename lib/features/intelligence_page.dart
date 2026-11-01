@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import '../core/api_client.dart';
 import '../design_system/components.dart';
+import 'login_required.dart';
 import '../design_system/tokens.dart';
 import '../playback/playback_controller.dart';
 import 'browse_page.dart';
@@ -143,20 +144,23 @@ class _IntelligencePageState extends State<IntelligencePage> {
         if (playback.loading) {
           return const Center(child: CupertinoActivityIndicator());
         }
-        final message = StatusMessage(
-          title: title,
-          message:
-              playback.error ??
-              (widget.privateFm
-                  ? '按你的网易云偏好持续推荐。开始收听才会切换当前队列。'
-                  : '从我喜欢的音乐出发，听一些新的推荐。'),
-          action: ActionButton(
-            label: widget.privateFm ? '开始私人 FM' : '开始心动播放',
-            onPressed: widget.privateFm
-                ? playback.startFm
-                : playback.startIntelligence,
-          ),
-        );
+        final needsLogin = !widget.privateFm && playback.api.guest;
+        final message = needsLogin
+            ? LoginRequiredView(api: playback.api, title: title)
+            : StatusMessage(
+                title: title,
+                message:
+                    playback.error ??
+                    (widget.privateFm
+                        ? '按你的网易云偏好持续推荐。开始收听才会切换当前队列。'
+                        : '从我喜欢的音乐出发，听一些新的推荐。'),
+                action: ActionButton(
+                  label: widget.privateFm ? '开始私人 FM' : '开始心动播放',
+                  onPressed: widget.privateFm
+                      ? playback.startFm
+                      : playback.startIntelligence,
+                ),
+              );
         if (widget.header == null) return message;
         // 还没开始收听时不可滚动：页眉固定在顶部，下面显示状态。
         return Column(

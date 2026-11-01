@@ -109,7 +109,7 @@ class SyncService extends ChangeNotifier {
       _kUser = 'sync.user',
       _kFolder = 'sync.folder';
   static const _kPass = 'dymuse.sync.password', _kPhrase = 'dymuse.sync.phrase';
-  static const _kinds = ['netease', 'bilibili'];
+  static const _kinds = ['netease', 'bilibili', 'link'];
   static const _queueKeys = {
     'netease': 'aio.queue',
     'bilibili': 'aio.queue.bilibili',
