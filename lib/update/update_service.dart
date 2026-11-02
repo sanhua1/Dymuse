@@ -127,10 +127,11 @@ class UpdateService extends ChangeNotifier {
     return 'ios';
   }
 
-  /// 本平台能否在应用内下载并安装（Windows 原地更新、Android 交给系统安装器）。
+  /// 本平台能否在应用内下载并安装（Windows、macOS 原地更新，Android 交给系统安装器）。
   bool get canInstall =>
       (Platform.isWindows && platform == 'windows-x64') ||
-      (Platform.isAndroid && platform == 'android-arm64');
+      (Platform.isAndroid && platform == 'android-arm64') ||
+      (Platform.isMacOS && platform == 'macos');
 
   String? get ignoredVersion => preferences.getString(ignoredKey);
   Future<void> ignore(String version) =>

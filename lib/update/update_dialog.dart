@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../design_system/tokens.dart';
 import 'android_installer.dart';
 import 'update_service.dart';
+import 'mac_installer.dart';
 import 'windows_installer.dart';
 
 /// 启动或手动检查更新。有新版本弹出提示；[manual] 时没有更新或失败也会说明。
@@ -64,7 +66,7 @@ Future<void> _showUpdate(
   ),
 );
 
-enum _Phase { offer, working, failed }
+enum _Phase { offer, working, manual, failed }
 
 class _UpdateDialog extends StatefulWidget {
   const _UpdateDialog({required this.service, required this.info});
@@ -97,7 +99,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   Future<void> _update() async {
     final service = widget.service;
     if (!service.canInstall) {
-      // macOS 等暂时交给浏览器下载。
+      // 其余平台（iOS）交给浏览器下载。
       final url = _info.downloadUrls.isEmpty ? null : _info.downloadUrls.first;
       if (url != null) {
         unawaited(
@@ -114,18 +116,20 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       _error = null;
     });
     try {
-      final file = _package ?? await service.download(
-        _info,
-        onProgress: (got, total) {
-          if (!mounted) return;
-          setState(() {
-            _progress = total > 0 ? got / total : null;
-            _status = total > 0
-                ? '正在下载… ${(got / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB'
-                : '正在下载…';
-          });
-        },
-      );
+      final file =
+          _package ??
+          await service.download(
+            _info,
+            onProgress: (got, total) {
+              if (!mounted) return;
+              setState(() {
+                _progress = total > 0 ? got / total : null;
+                _status = total > 0
+                    ? '正在下载… ${(got / 1048576).toStringAsFixed(1)} / ${(total / 1048576).toStringAsFixed(1)} MB'
+                    : '正在下载…';
+              });
+            },
+          );
       _package = file;
       if (!mounted) return;
       if (Platform.isAndroid) {
@@ -151,6 +155,16 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         _status = '校验通过，正在更新并重启…';
         _progress = null;
       });
+      if (Platform.isMacOS) {
+        await prepareMacUpdate(file);
+        if (!mounted) return;
+        setState(() {
+          _phase = _Phase.manual;
+          _error =
+              '新版已下载并校验，安装窗口已打开。点“好”后 Dymuse 会自动退出，请把新版 Dymuse 拖到「应用程序」上并选择“替换”，再重新打开。';
+        });
+        return;
+      }
       await startWindowsUpdate(file);
       await service.quit?.call();
     } catch (error) {
@@ -173,9 +187,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           for (final source in sources)
             CupertinoActionSheetAction(
               onPressed: () => Navigator.pop(sheet, source),
-              child: Text(
-                source.name == 'Gitee' ? 'Gitee（国内推荐）' : source.name,
-              ),
+              child: Text(source.name == 'Gitee' ? 'Gitee（国内推荐）' : source.name),
             ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -232,6 +244,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           ],
         ),
       ),
+      _Phase.manual => Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Text(
+          _error ?? '',
+          style: const TextStyle(fontSize: 13, height: 1.45),
+        ),
+      ),
       _Phase.failed => Padding(
         padding: const EdgeInsets.only(top: 12),
         child: Text(
@@ -258,6 +277,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     };
     final actions = switch (_phase) {
       _Phase.working => <Widget>[],
+      _Phase.manual => [
+        CupertinoDialogAction(
+          isDefaultAction: true,
+          onPressed: () => SystemNavigator.pop(), // 真正退出（会先保存播放进度），Finder 才能替换
+          child: const Text('好'),
+        ),
+      ],
       _Phase.failed => [
         CupertinoDialogAction(
           onPressed: () => Navigator.pop(context),

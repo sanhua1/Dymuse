@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 port = int(sys.argv[1])
 zip_path = sys.argv[2]
 new_version = sys.argv[3] if len(sys.argv) > 3 else '9.9.9'
-name = 'Dymuse-windows-x64.zip'
+key, name = ('macos', 'Dymuse-macos.dmg') if os.environ.get('DYMUSE_TEST_PLATFORM') == 'macos' else ('windows-x64', 'Dymuse-windows-x64.zip')
 data = open(zip_path, 'rb').read()
 state = {'downloaded': False}
 tag = f'v{new_version}'
@@ -27,7 +27,7 @@ def manifest():
         'build': 2,
         'notes': '联调用的假更新。\n- 下载并校验安装包\n- 退出后覆盖并重启',
         'assets': {
-            'windows-x64': {
+            key: {
                 'name': name,
                 'size': len(data),
                 'sha256': hashlib.sha256(data).hexdigest(),

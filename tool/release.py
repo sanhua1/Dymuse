@@ -30,7 +30,7 @@ GITHUB_REPO = 'sanhua1/Dymuse'
 PLATFORMS = {
     'windows': ('windows-x64', 'Dymuse-windows-x64.zip'),
     'android': ('android-arm64', 'Dymuse-android-arm64.apk'),
-    'macos': ('macos', 'Dymuse-macos.zip'),
+    'macos': ('macos', 'Dymuse-macos.dmg'),
 }
 
 
