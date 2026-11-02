@@ -153,7 +153,7 @@ class _IntelligencePageState extends State<IntelligencePage> {
                     playback.error ??
                     (widget.privateFm
                         ? '按你的网易云偏好持续推荐。开始收听才会切换当前队列。'
-                        : '从我喜欢的音乐出发，听一些新的推荐。'),
+                        : '从“我喜欢”出发，听一些新的推荐。'),
                 action: ActionButton(
                   label: widget.privateFm ? '开始私人 FM' : '开始心动播放',
                   onPressed: widget.privateFm
@@ -212,7 +212,7 @@ class _IntelligencePageState extends State<IntelligencePage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${widget.privateFm ? '网易云私人 FM' : '根据我喜欢的音乐推荐'} · 当前队列 ${playback.items.length} 首',
+                      '${widget.privateFm ? '网易云私人 FM' : '根据“我喜欢”推荐'} · 当前队列 ${playback.items.length} 首',
                       style: DymuseTokens.body.copyWith(
                         color: DymuseTokens.secondary(context),
                       ),

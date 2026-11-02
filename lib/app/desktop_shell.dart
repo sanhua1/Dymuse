@@ -373,7 +373,7 @@ class _DesktopShellState extends State<DesktopShell> {
                     compact,
                   ),
                   _nav(
-                    '我喜欢的音乐',
+                    '我喜欢',
                     CupertinoIcons.heart,
                     () => navigate('favorites'),
                     !settings && browser.section == 'favorites',
@@ -395,7 +395,7 @@ class _DesktopShellState extends State<DesktopShell> {
                     compact,
                   ),
                   _nav(
-                    '我喜欢的音乐',
+                    '我喜欢',
                     CupertinoIcons.heart,
                     () => navigate('favorites'),
                     !settings && browser.section == 'favorites',

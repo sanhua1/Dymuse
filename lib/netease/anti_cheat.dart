@@ -1,8 +1,10 @@
 // 易盾反作弊令牌：在一个看不见的 WebView 里运行易盾官方 SDK（与 api-enhanced 用 jsdom 的做法等价）。
 // 只在需要令牌的操作（收藏歌单）时才创建，用完一段时间后销毁，平时不占资源。
 import 'dart:async';
+import 'dart:io';
 
 import 'package:webview_flutter/webview_flutter.dart';
+import '../platform/windows_script_browser.dart';
 
 class AntiCheat {
   static const _product = 'YD00000558929251';
@@ -11,6 +13,7 @@ class AntiCheat {
   static const _idle = Duration(minutes: 1);
 
   WebViewController? _web;
+  WindowsScriptBrowser? _windows;
   Future<void>? _loading;
   Completer<String>? _waiting;
   Timer? _closer;
@@ -19,9 +22,13 @@ class AntiCheat {
   Future<String> token() async {
     _closer?.cancel();
     try {
-      final web = await _ready();
+      await _ready();
       final waiting = _waiting = Completer<String>();
-      await web.runJavaScript('window.dymuseToken();');
+      if (Platform.isWindows) {
+        await _windows!.runJavaScript('window.dymuseToken();');
+      } else {
+        await _web!.runJavaScript('window.dymuseToken();');
+      }
       return await waiting.future.timeout(
         const Duration(seconds: 30),
         onTimeout: () => '',
@@ -34,21 +41,26 @@ class AntiCheat {
     }
   }
 
-  Future<WebViewController> _ready() async {
+  Future<void> _ready() async {
+    if (Platform.isWindows) {
+      if (_windows == null) {
+        final browser = _windows = WindowsScriptBrowser(onMessage: _receive);
+        _loading = browser.loadHtml(_page);
+      }
+      await _loading;
+      return;
+    }
     final existing = _web;
     if (existing != null) {
       await _loading;
-      return existing;
+      return;
     }
     final web = _web = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
         'Dymuse',
         onMessageReceived: (message) {
-          final waiting = _waiting;
-          if (waiting != null && !waiting.isCompleted) {
-            waiting.complete(message.message);
-          }
+          _receive(message.message);
         },
       );
     final loaded = Completer<void>();
@@ -62,17 +74,25 @@ class AntiCheat {
     _loading = loaded.future.timeout(const Duration(seconds: 20));
     await web.loadHtmlString(_page, baseUrl: 'https://music.163.com/');
     await _loading;
-    return web;
+  }
+
+  void _receive(String message) {
+    final waiting = _waiting;
+    if (waiting != null && !waiting.isCompleted) waiting.complete(message);
   }
 
   void _drop() {
     _closer?.cancel();
+    final browser = _windows;
+    _windows = null;
+    if (browser != null) unawaited(browser.dispose().catchError((_) {}));
     _web = null;
     _loading = null;
     _waiting = null;
   }
 
-  static const _page = '''
+  static const _page =
+      '''
 <!doctype html><html><head><meta charset="UTF-8"></head><body>
 <script src="$_toolJs"></script>
 <script>

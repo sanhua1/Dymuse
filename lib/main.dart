@@ -20,6 +20,7 @@ import 'playback/audio_engine.dart';
 import 'playback/audio_quality.dart';
 import 'playback/playback_controller.dart';
 import 'sync/sync_service.dart';
+import 'update/update_service.dart';
 
 /// 已注册 Windows、macOS、iOS 与 Android；手机使用独立移动导航，不创建桌面窗口。
 Future<void> main() async {
@@ -80,6 +81,8 @@ Future<void> main() async {
         ..miniProgressShown = preferences.getBool('miniProgress') ?? true;
   final sync = SyncService(preferences);
   session.sync = sync;
+  final update = UpdateService(preferences)..quit = window.close;
+  session.updates = update;
   final linkService = LinkService();
   session.linkService = linkService;
   unawaited(
@@ -134,6 +137,7 @@ Future<void> main() async {
       playback: playback,
       appearance: appearance,
       window: window,
+      update: update,
     ),
   );
   if (!Platform.isIOS && !Platform.isAndroid) await window.initialize();

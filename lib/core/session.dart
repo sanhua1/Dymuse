@@ -11,6 +11,7 @@ import '../netease/anti_cheat.dart';
 import '../netease/client.dart';
 import '../link_service/link_service.dart';
 import '../sync/sync_service.dart';
+import '../update/update_service.dart';
 import 'api_client.dart';
 import 'media_cache.dart';
 
@@ -38,6 +39,9 @@ class Session extends ChangeNotifier {
   /// WebDAV 同步；由 main 创建后挂上，用来同步登录凭证等。
   SyncService? sync;
 
+  /// 更新检测；由 main 创建后挂上，设置页用它手动检查。
+  UpdateService? updates;
+
   /// 取链服务（多人共享会员账号）；由 main 创建后挂上，没有配置时不起作用。
   LinkService? linkService;
   LocalBackend? backend;
@@ -58,7 +62,7 @@ class Session extends ChangeNotifier {
   Future<void> restore() async {
     api.server = 'dymuse://local';
     api.onUnauthorized = expire;
-    api.onLoginRequested = () => unawaited(startLogin());
+    api.onLoginRequested = startLogin;
     if (!preferences.containsKey('deviceId')) {
       final random = Random.secure();
       await preferences.setString(
@@ -272,18 +276,12 @@ class Session extends ChangeNotifier {
     notice = null;
   }
 
-  /// 游客想用需要账号的功能：回到登录页（可再选择“先不登录”）。
-  Future<void> startLogin() async {
-    await preferences.remove(_guestKey);
-    guest = false;
-    api.guest = false;
-    api.token = null;
-    api.cacheScope = MediaCache.privateScope = null;
-    user = null;
-    epoch++;
-    notice = null;
-    notifyListeners();
-  }
+  /// 由界面层挂上：弹出“登录网易云”页面（桌面是弹窗，手机是 Sheet）。
+  /// 游客身份保持不变，关掉就回到原来的页面；登录成功后自动关闭。
+  VoidCallback? loginPresenter;
+
+  /// 游客想用需要账号的功能，或在设置里点“登录网易云账号”。
+  void startLogin() => loginPresenter?.call();
 
   /// 二维码登录：生成或复用当前二维码。
   Future<Json> createQr() async {
@@ -301,6 +299,43 @@ class Session extends ChangeNotifier {
       sync?.scheduleSoon();
     }
     return data;
+  }
+
+  /// 手机号登录（密码或验证码）。成功后与扫码登录一样保存凭证并进入账号。
+  /// 失败抛 [NeteaseError]；需要安全验证时 code 为 [NeteaseClient.loginRisk]。
+  Future<void> loginWithPhone({
+    required String phone,
+    String? password,
+    String? captcha,
+  }) async {
+    final client = netease;
+    final local = backend;
+    if (client == null || local == null) {
+      throw const NeteaseError('NOT_READY', '应用尚未初始化完成。');
+    }
+    await client.loginCellphone(
+      phone: phone,
+      password: password,
+      captcha: captcha,
+    );
+    final profile = await local.refreshAccount();
+    if (profile == null) {
+      client.logout();
+      throw const NeteaseError('LOGIN_FAILED', '登录失败，请重试。', 401);
+    }
+    _signIn(profile);
+    unawaited(sync?.noteLogin('netease') ?? Future<void>.value());
+    await _save();
+    sync?.scheduleSoon();
+  }
+
+  /// 向手机号发送登录验证码。
+  Future<void> sendLoginCaptcha(String phone) async {
+    final client = netease;
+    if (client == null) {
+      throw const NeteaseError('NOT_READY', '应用尚未初始化完成。');
+    }
+    await client.sendCaptcha(phone);
   }
 
   Future<void> _save() async {
@@ -356,7 +391,7 @@ class Session extends ChangeNotifier {
     api.cacheScope = MediaCache.privateScope = null;
     user = null;
     _reset();
-    notice = '登录已结束，请使用网易云音乐扫码登录。';
+    notice = '网易云登录已结束，请重新登录。';
     storage.write(key: _cookieKey, value: '').catchError((_) {});
     notifyListeners();
   }

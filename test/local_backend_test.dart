@@ -160,7 +160,11 @@ void main() {
     });
     prefs = await SharedPreferences.getInstance();
     client = FakeClient();
-    backend = LocalBackend(prefs, client, BilibiliBackend(prefs, BilibiliClient()));
+    backend = LocalBackend(
+      prefs,
+      client,
+      BilibiliBackend(prefs, BilibiliClient()),
+    );
   });
 
   Future<Map<String, dynamic>> call(
@@ -350,7 +354,11 @@ void main() {
 
   test('收藏别人的歌单、往自己的歌单加歌都能走通路由', () async {
     final fake = _ListClient();
-    final b = LocalBackend(prefs, fake, BilibiliBackend(prefs, BilibiliClient()));
+    final b = LocalBackend(
+      prefs,
+      fake,
+      BilibiliBackend(prefs, BilibiliClient()),
+    );
     final saved = await b.handle('POST', '/playlists/5/subscription', null, {
       'subscribed': true,
     });
@@ -365,7 +373,11 @@ void main() {
 
   test('歌单分页按 trackIds 还原并补齐缺失详情', () async {
     final fake = _DetailClient();
-    final page = LocalBackend(prefs, fake, BilibiliBackend(prefs, BilibiliClient()));
+    final page = LocalBackend(
+      prefs,
+      fake,
+      BilibiliBackend(prefs, BilibiliClient()),
+    );
     final data =
         (await page.handle('GET', '/playlist/page', {
               'id': '9',

@@ -11,8 +11,10 @@ import '../features/catalog.dart';
 import '../platform/desktop_window.dart';
 import '../playback/playback_controller.dart';
 import '../playback/playback_checkpoints.dart';
-import 'desktop_shell.dart';
 import 'login_page.dart';
+import 'netease_login.dart';
+import '../update/update_dialog.dart';
+import '../update/update_service.dart';
 import 'mac_shell.dart';
 import 'mobile_shell.dart';
 
@@ -24,7 +26,9 @@ class DymuseApp extends StatefulWidget {
     required this.playback,
     required this.appearance,
     required this.window,
+    this.update,
   });
+  final UpdateService? update;
   final Session session;
   final Catalog catalog;
   final PlaybackController playback;
@@ -36,9 +40,12 @@ class DymuseApp extends StatefulWidget {
 
 class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
   String? activeUser;
+  final _navigatorKey = GlobalKey<NavigatorState>();
   @override
   void initState() {
     super.initState();
+    widget.session.loginPresenter = _presentLogin;
+    unawaited(_startupUpdateCheck());
     WidgetsBinding.instance.addObserver(this);
     widget.session.addListener(sessionChanged);
     widget.appearance.addListener(saveAppearance);
@@ -66,6 +73,26 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
       const Duration(seconds: 2),
       onTimeout: () {},
     );
+  }
+
+  /// 启动后等会话恢复完、界面稳定，再静默检查一次更新。
+  Future<void> _startupUpdateCheck() async {
+    final update = widget.update;
+    if (update == null) return;
+    await Future<void>.delayed(const Duration(seconds: 4));
+    while (widget.session.restoring) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+    }
+    final navigator = _navigatorKey.currentState;
+    if (!mounted || navigator == null) return;
+    await checkForUpdates(navigator, update);
+  }
+
+  void _presentLogin() {
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    unawaited(showNeteaseLogin(navigator, widget.session));
   }
 
   void sessionChanged() {
@@ -99,6 +126,9 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.session.removeListener(sessionChanged);
+    if (widget.session.loginPresenter == _presentLogin) {
+      widget.session.loginPresenter = null;
+    }
     widget.appearance.removeListener(saveAppearance);
     super.dispose();
   }
@@ -131,6 +161,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
       return AppearanceScope(
         appearance: appearance,
         child: CupertinoApp(
+          navigatorKey: _navigatorKey,
           title: 'Dymuse',
           debugShowCheckedModeBanner: false,
           locale: const Locale('zh', 'CN'),
@@ -157,6 +188,11 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
             final effective = CupertinoTheme.brightnessOf(context);
             final app = MediaQuery(
               data: media.copyWith(
+                // 系统字体放得再大，也最多按 1.6 倍显示，布局不至于崩坏。
+                textScaler: media.textScaler.clamp(
+                  minScaleFactor: 1,
+                  maxScaleFactor: 1.6,
+                ),
                 disableAnimations:
                     media.disableAnimations || appearance.reduceMotion,
               ),
@@ -170,7 +206,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                   thickness: 18,
                 ),
                 // Apple 平台由系统负责缩放和边框；macOS 背景留给原生侧栏材质。
-                child: DymuseTokens.liquid
+                child: DymuseTokens.mobile || DymuseTokens.macOS
                     ? child!
                     : DragToResizeArea(
                         resizeEdgeSize: 5,
@@ -222,12 +258,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                         bottom: MediaQuery.viewInsetsOf(context).bottom,
                       ),
                       child: SafeArea(
-                        child: LoginPage(
-                          key: ValueKey(
-                            '${widget.session.mustChangePassword}${widget.session.firstLogin}',
-                          ),
-                          session: widget.session,
-                        ),
+                        child: WelcomePage(session: widget.session),
                       ),
                     ),
                   );
@@ -239,14 +270,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                   child: Column(
                     children: [
                       WindowTitleBar(window: widget.window),
-                      Expanded(
-                        child: LoginPage(
-                          key: ValueKey(
-                            '${widget.session.mustChangePassword}${widget.session.firstLogin}',
-                          ),
-                          session: widget.session,
-                        ),
-                      ),
+                      Expanded(child: WelcomePage(session: widget.session)),
                     ],
                   ),
                 );
@@ -266,19 +290,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                   ),
                 );
               }
-              if (DymuseTokens.macOS) {
-                return MacShell(
-                  key: ValueKey(
-                    '${widget.session.api.server}:${widget.session.user!['id']}',
-                  ),
-                  session: widget.session,
-                  catalog: widget.catalog,
-                  playback: widget.playback,
-                  appearance: appearance,
-                  window: widget.window,
-                );
-              }
-              return DesktopShell(
+              return MacShell(
                 key: ValueKey(
                   '${widget.session.api.server}:${widget.session.user!['id']}',
                 ),

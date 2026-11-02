@@ -118,7 +118,7 @@ class BrowseState extends ChangeNotifier {
   }
 
   /// 是否进入了某个集合的内部（歌单、专辑、艺人、播客等），决定“返回”是否有意义。
-  /// “我喜欢的音乐”加载后也会带上来源歌单，但它是资料库入口本身，不算进入集合。
+  /// “我喜欢”加载后也会带上来源歌单，但它是资料库入口本身，不算进入集合。
   bool get drilled => collection != null && section != 'favorites';
   CatalogPage page = const CatalogPage();
   bool loading = false, loaded = false;
@@ -235,7 +235,7 @@ class BrowseState extends ChangeNotifier {
                   'library': '资料库',
                   'albums': '专辑',
                   'artists': '艺人',
-                  'favorites': '我喜欢的音乐',
+                  'favorites': '我喜欢',
                   'intelligence': '心动模式',
                   'playlists': mode == MusicMode.netease ? '我的歌单' : '歌单',
                   'podcasts': '播客',
@@ -298,7 +298,7 @@ class BrowseState extends ChangeNotifier {
 
   Future<void> retry() => load(more: _retryMore);
 
-  /// 游客打开“我喜欢的音乐 / 我的歌单 / 播客”这类依赖网易云账号的页面：不请求，显示登录提示。
+  /// 游客打开“我喜欢 / 我的歌单 / 播客”这类依赖网易云账号的页面：不请求，显示登录提示。
   bool get needsLogin =>
       catalog.api.guest &&
       mode == MusicMode.netease &&
@@ -756,7 +756,7 @@ class BrowsePage extends StatelessWidget {
                 child: LoginRequiredView(
                   api: browser.catalog.api,
                   title: switch (browser.section) {
-                    'favorites' => '我喜欢的音乐',
+                    'favorites' => '我喜欢',
                     'playlists' => '我的歌单',
                     _ => '播客',
                   },

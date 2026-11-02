@@ -7,6 +7,7 @@ import '../design_system/components.dart';
 import '../design_system/tokens.dart';
 import '../playback/audio_quality.dart';
 import '../platform/desktop_window.dart';
+import '../update/update_panel.dart';
 import '../playback/playback_controller.dart';
 import 'accent_picker.dart';
 import 'bilibili_account.dart';
@@ -128,7 +129,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   PanelButton(
                     label: '登录网易云账号',
                     prominent: true,
-                    onPressed: () => unawaited(session.startLogin()),
+                    onPressed: session.startLogin,
                   ),
                 ],
               )
@@ -197,6 +198,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 '自定义规则优先于内置规则。在列表的“···”菜单里随时可以查看原视频名。',
           ),
           _group('通用'),
+          if (session.updates != null)
+            _section('软件更新', [UpdatePanel(service: session.updates!)]),
           _section('外观', [
             _setting(
               '配色',

@@ -1,387 +1,301 @@
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import '../core/api_client.dart';
 import '../core/session.dart';
-import '../features/sync_settings.dart';
-import '../design_system/components.dart';
 import '../design_system/tokens.dart';
+import '../features/sync_settings.dart';
+import 'netease_login.dart';
 
-/// 网易云扫码登录：二维码由手机自己向网易云申请，登录后 Cookie 只留本机。
-class LoginPage extends StatefulWidget {
-  const LoginPage({super.key, required this.session});
+/// 第一次打开（或登录结束后）的欢迎页：选一种方式开始使用。
+class WelcomePage extends StatefulWidget {
+  const WelcomePage({super.key, required this.session});
   final Session session;
   @override
-  State<LoginPage> createState() => _LoginPageState();
+  State<WelcomePage> createState() => _WelcomePageState();
 }
 
-class _LoginPageState extends State<LoginPage> {
-  String _url = '';
-  int _code = 801;
-  DateTime? _expiresAt;
-  Timer? _timer;
-  bool _busy = false;
-  String? _error;
+class _WelcomePageState extends State<WelcomePage> {
+  bool _login = false;
 
   @override
-  void initState() {
-    super.initState();
-    unawaited(_create());
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _create() async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-      _url = '';
-    });
-    try {
-      final data = await widget.session.createQr();
-      if (!mounted) return;
-      setState(() {
-        _url = '${data['url'] ?? ''}';
-        _code = (data['code'] as num?)?.toInt() ?? 801;
-        final at = (data['expiresAt'] as num?)?.toInt();
-        _expiresAt = at == null
-            ? DateTime.now().add(const Duration(minutes: 2))
-            : DateTime.fromMillisecondsSinceEpoch(at);
-      });
-      _timer?.cancel();
-      _timer = Timer.periodic(
-        const Duration(seconds: 2),
-        (_) => unawaited(_check()),
-      );
-    } catch (error) {
-      if (mounted) setState(() => _error = readableError(error));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _check() async {
-    if (_code == 803 || _code == 800) return;
-    try {
-      final data = await widget.session.checkQr();
-      if (!mounted) return;
-      final code = (data['code'] as num?)?.toInt() ?? _code;
-      // 803 时 Session 会切到已登录界面，这里不再改状态。
-      if (code == 803) {
-        _timer?.cancel();
-        return;
-      }
-      setState(() => _code = code);
-    } catch (error) {
-      if (mounted) setState(() => _error = readableError(error));
-    }
-  }
-
-  String get _status => switch (_code) {
-    800 => '二维码已过期',
-    802 => '已扫码，请在手机上确认登录',
-    803 => '登录成功',
-    _ => '打开网易云音乐 App，扫一扫登录',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final ink = DymuseTokens.ink(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 1000;
-        return Row(
-          children: [
-            if (wide)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(70, 30, 30, 55),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Spacer(),
-                      const Text(
-                        '音乐，\n回到纯粹。',
-                        style: TextStyle(
-                          fontSize: 46,
-                          height: 1.25,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -1.8,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Text(
-                        '你的音乐。你的片刻。',
-                        style: TextStyle(
-                          color: DymuseTokens.secondary(context),
-                          fontSize: 17,
-                        ),
-                      ),
-                      const Expanded(
-                        flex: 5,
-                        child: Center(child: RecordArtwork()),
-                      ),
-                      Text(
-                        'D Y M U S E',
-                        style: TextStyle(
-                          color: DymuseTokens.secondary(context),
-                          fontSize: 11,
-                          letterSpacing: 5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            Expanded(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 42,
-                    vertical: 30,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 350),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
-                          child: Image.asset(
-                            'assets/brand/app_icon.png',
-                            width: 64,
-                            height: 64,
-                            semanticLabel: 'Dymuse',
-                          ),
-                        ),
-                        const SizedBox(height: 28),
-                        Text('登录网易云音乐', style: DymuseTokens.heading),
-                        const SizedBox(height: 10),
-                        Text(
-                          '用网易云音乐 App 扫码登录。登录信息只保存在这台设备上，'
-                          '歌曲、歌单和播放请求都由这台设备直接连接网易云。',
-                          style: DymuseTokens.body.copyWith(
-                            color: DymuseTokens.secondary(context),
-                            height: 1.6,
-                          ),
-                        ),
-                        const SizedBox(height: 26),
-                        Center(
-                          child: GestureDetector(
-                            onTap: _busy ? null : _create,
-                            child: Container(
-                              width: 216,
-                              height: 216,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: CupertinoColors.white,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: _url.isEmpty
-                                  ? const Center(
-                                      child: CupertinoActivityIndicator(
-                                        radius: 16,
-                                      ),
-                                    )
-                                  : Opacity(
-                                      opacity: _code == 800 ? .18 : 1,
-                                      child: QrImageView(
-                                        data: _url,
-                                        size: 192,
-                                        backgroundColor: CupertinoColors.white,
-                                        eyeStyle: const QrEyeStyle(
-                                          eyeShape: QrEyeShape.square,
-                                          color: CupertinoColors.black,
-                                        ),
-                                        dataModuleStyle:
-                                            const QrDataModuleStyle(
-                                              dataModuleShape:
-                                                  QrDataModuleShape.square,
-                                              color: CupertinoColors.black,
-                                            ),
-                                      ),
-                                    ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Center(
-                          child: Text(
-                            _status,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: _code == 802
-                                  ? ink
-                                  : DymuseTokens.secondary(context),
-                            ),
-                          ),
-                        ),
-                        if (_code == 800)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 10),
-                            child: Center(
-                              child: ActionButton(
-                                label: '刷新二维码',
-                                onPressed: _create,
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 18),
-                        if (_error != null || widget.session.notice != null)
-                          Semantics(
-                            liveRegion: true,
-                            child: Text(
-                              _error ?? widget.session.notice!,
-                              style: TextStyle(
-                                color: _error != null
-                                    ? DymuseTokens.tint(context)
-                                    : DymuseTokens.secondary(context),
-                                fontSize: 12,
-                                height: 1.5,
-                              ),
-                            ),
-                          ),
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Column(
-                            children: [
-                              Center(
-                                child: ActionButton(
-                                  label: '先不登录，直接使用',
-                                  onPressed: () =>
-                                      unawaited(widget.session.enterGuest()),
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '不登录也能搜索、浏览和播放；红心、我的歌单、推荐等功能需要登录。',
-                                textAlign: TextAlign.center,
-                                style: DymuseTokens.caption.copyWith(
-                                  color: DymuseTokens.secondary(context),
-                                  height: 1.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (widget.session.sync != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Center(
-                              child: ActionButton(
-                                label: '已有同步？用 WebDAV 恢复登录',
-                                onPressed: () =>
-                                    showSyncForm(context, widget.session.sync!),
-                              ),
-                            ),
-                          ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _expiresAt == null ? '' : '二维码约 2 分钟有效，过期后点按二维码刷新。',
-                          style: DymuseTokens.caption.copyWith(
-                            color: DymuseTokens.secondary(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 30),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: AnimatedSwitcher(
+          duration: DymuseTokens.motion,
+          switchInCurve: Curves.easeOutCubic,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, .02),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
             ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// 程序绘制的唱片标识，无外部图片或未经许可的字体资产。
-class RecordArtwork extends StatelessWidget {
-  const RecordArtwork({super.key});
-  @override
-  Widget build(BuildContext context) => AspectRatio(
-    aspectRatio: 1,
-    child: Padding(
-      padding: const EdgeInsets.all(28),
-      child: CustomPaint(painter: _RecordPainter()),
+          ),
+          child: _login
+              ? NeteaseLoginView(
+                  key: const ValueKey('login'),
+                  session: widget.session,
+                  onBack: () => setState(() => _login = false),
+                )
+              : _Choices(
+                  key: const ValueKey('choices'),
+                  session: widget.session,
+                  onLogin: () => setState(() => _login = true),
+                ),
+        ),
+      ),
     ),
   );
 }
 
-class _RecordPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    canvas.drawCircle(
-      center.translate(0, 12),
-      radius * .95,
-      Paint()
-        ..color = const Color(0x14382948)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22),
-    );
-    canvas.drawCircle(
-      center,
-      radius,
-      Paint()
-        ..shader = const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF34313E),
-            Color(0xFF15131C),
-            Color(0xFF4D4352),
-            Color(0xFF201C29),
+class _Choices extends StatelessWidget {
+  const _Choices({super.key, required this.session, required this.onLogin});
+  final Session session;
+  final VoidCallback onLogin;
+
+  static void _explain(BuildContext context, String title, String text) =>
+      showCupertinoDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialog) => CupertinoAlertDialog(
+          title: Text(title),
+          content: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(text, textAlign: TextAlign.start),
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('好'),
+            ),
           ],
-        ).createShader(rect),
-    );
-    for (var i = 0; i < 35; i++) {
-      canvas.drawCircle(
-        center,
-        radius * (.42 + i * .015),
-        Paint()
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = .6
-          ..color = const Color(0x165F596A),
-      );
-    }
-    canvas.drawCircle(
-      center,
-      radius * .34,
-      Paint()
-        ..shader = const LinearGradient(
-          colors: [Color(0xFFE9B4C2), Color(0xFFB56589), Color(0xFF785778)],
-        ).createShader(rect),
-    );
-    final text = TextPainter(
-      text: const TextSpan(
-        text: 'dy',
-        style: TextStyle(
-          fontSize: 34,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFFF7E8EE),
-          letterSpacing: -3,
         ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    text.paint(
-      canvas,
-      center - Offset(text.width / 2, text.height / 2 + radius * .025),
-    );
-    canvas.drawCircle(
-      center.translate(0, radius * .2),
-      radius * .018,
-      Paint()..color = const Color(0xFF342839),
-    );
-  }
+      );
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  Widget build(BuildContext context) {
+    final sync = session.sync;
+    final notice = session.notice;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(19),
+            child: Image.asset(
+              'assets/brand/app_icon.png',
+              width: 76,
+              height: 76,
+              semanticLabel: 'Dymuse',
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          '开始使用 Dymuse',
+          textAlign: TextAlign.center,
+          style: DymuseTokens.heading,
+        ),
+        if (notice != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                notice,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: DymuseTokens.secondary(context),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 32),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: DymuseTokens.surface(context),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Column(
+              children: [
+                _OptionRow(
+                  icon: CupertinoIcons.person_fill,
+                  color: const Color(0xFFE5484D),
+                  title: '登录网易云账号',
+                  onTap: onLogin,
+                  info: () => _explain(
+                    context,
+                    '登录网易云账号',
+                    '可以扫码、用密码或短信验证码登录。登录信息只保存在这台设备上，'
+                        '歌曲、歌单和播放请求都由这台设备直接连接网易云。',
+                  ),
+                ),
+                _OptionRow(
+                  icon: CupertinoIcons.music_note_2,
+                  color: const Color(0xFF3E82F7),
+                  title: '不登录，直接使用',
+                  divider: true,
+                  onTap: () => unawaited(session.enterGuest()),
+                  info: () => _explain(
+                    context,
+                    '不登录，直接使用',
+                    '不登录也能搜索、浏览和播放；红心、我的歌单、推荐等功能需要登录。'
+                        '之后随时可以在设置里登录。',
+                  ),
+                ),
+                if (sync != null)
+                  _OptionRow(
+                    icon: CupertinoIcons.cloud_fill,
+                    color: const Color(0xFF2FA9A1),
+                    title: '从 WebDAV 同步数据',
+                    divider: true,
+                    onTap: () => showSyncForm(context, sync),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 一行选项：彩色图标 + 标题，右侧可选的说明按钮与箭头；悬停、按下和键盘焦点都有反馈。
+class _OptionRow extends StatefulWidget {
+  const _OptionRow({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.onTap,
+    this.info,
+    this.divider = false,
+  });
+  final IconData icon;
+  final Color color;
+  final String title;
+  final VoidCallback onTap;
+  final VoidCallback? info;
+  final bool divider;
+  @override
+  State<_OptionRow> createState() => _OptionRowState();
+}
+
+class _OptionRowState extends State<_OptionRow> {
+  bool _hover = false, _pressed = false, _focus = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = DymuseTokens.ink(context);
+    final secondary = DymuseTokens.secondary(context);
+    return Semantics(
+      button: true,
+      label: widget.title,
+      excludeSemantics: true,
+      onTap: widget.onTap,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: FocusableActionDetector(
+          onShowFocusHighlight: (value) => setState(() => _focus = value),
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                widget.onTap();
+                return null;
+              },
+            ),
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              decoration: BoxDecoration(
+                color: ink.withValues(
+                  alpha: _pressed
+                      ? .12
+                      : _hover || _focus
+                      ? .06
+                      : 0,
+                ),
+                border: widget.divider
+                    ? Border(top: BorderSide(color: DymuseTokens.line(context)))
+                    : null,
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+              child: Row(
+                children: [
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: widget.color,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: SizedBox(
+                      width: 34,
+                      height: 34,
+                      child: Icon(
+                        widget.icon,
+                        size: 19,
+                        color: CupertinoColors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (widget.info != null)
+                    Semantics(
+                      button: true,
+                      label: '${widget.title} 说明',
+                      excludeSemantics: true,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: widget.info,
+                        child: SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: Center(
+                            child: Icon(
+                              CupertinoIcons.info_circle,
+                              size: 17,
+                              color: secondary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Icon(
+                    CupertinoIcons.chevron_forward,
+                    size: 15,
+                    color: secondary,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

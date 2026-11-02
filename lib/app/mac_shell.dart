@@ -17,9 +17,9 @@ import '../playback/player_view.dart';
 
 enum _SidePanel { none, lyrics, queue }
 
-/// macOS 外壳：参照 Apple Music（macOS 26）的布局——
+/// 桌面外壳：参照 Apple Music（macOS 26）的布局——
 /// 左侧为内嵌圆角侧栏（原生侧栏材质），底部为悬浮玻璃播放条，
-/// 歌词与播放队列在右侧栏切换。业务状态、页面和播放控制与 Windows 共用。
+/// 歌词与播放队列在右侧栏切换；Windows 另绘窗口按钮并使用 Ctrl 快捷键。
 class MacShell extends StatefulWidget {
   const MacShell({
     super.key,
@@ -137,6 +137,12 @@ class _MacShellState extends State<MacShell> {
   void changeVolume(double delta) =>
       playback.setVolume((playback.volume + delta).clamp(0.0, 1.0));
 
+  /// 展开播放页时结束搜索编辑，避免隐藏输入框继续接收键盘事件。
+  void expandPlayer() {
+    searchFocus.unfocus();
+    setState(() => expanded = true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
@@ -158,7 +164,45 @@ class _MacShellState extends State<MacShell> {
               focusContext?.widget is EditableText ||
               focusContext?.findAncestorWidgetOfExactType<EditableText>() !=
                   null;
-          if (event is! KeyDownEvent || editing) return KeyEventResult.ignored;
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          // Windows 保留搜索、设置和全屏入口，文本编辑不触发播放快捷键。
+          final control =
+              DymuseTokens.windows &&
+              HardwareKeyboard.instance.isControlPressed &&
+              !HardwareKeyboard.instance.isAltPressed &&
+              !HardwareKeyboard.instance.isMetaPressed;
+          if (control && event.logicalKey == LogicalKeyboardKey.keyF) {
+            if (expanded) setState(() => expanded = false);
+            searchFocus.requestFocus();
+            return KeyEventResult.handled;
+          }
+          if (control && event.logicalKey == LogicalKeyboardKey.comma) {
+            setState(() {
+              settings = true;
+              expanded = false;
+            });
+            return KeyEventResult.handled;
+          }
+          if (DymuseTokens.windows &&
+              event.logicalKey == LogicalKeyboardKey.f11) {
+            unawaited(widget.window.toggleFullScreen());
+            return KeyEventResult.handled;
+          }
+          if (editing) return KeyEventResult.ignored;
+          if (control) {
+            if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+              playback.next();
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+              playback.previous();
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey == LogicalKeyboardKey.keyL) {
+              revealCurrent();
+              return KeyEventResult.handled;
+            }
+          }
           if (event.logicalKey == LogicalKeyboardKey.space) {
             playback.toggle();
             return KeyEventResult.handled;
@@ -207,7 +251,9 @@ class _MacShellState extends State<MacShell> {
                     const Radius.circular(14),
                   ),
                   background: DymuseTokens.background(context),
-                  panelFill: solid ? DymuseTokens.surface(context) : null,
+                  panelFill: solid || DymuseTokens.windows
+                      ? DymuseTokens.surface(context)
+                      : null,
                   border: DymuseTokens.line(context),
                 ),
               ),
@@ -269,7 +315,7 @@ class _MacShellState extends State<MacShell> {
                   panel: panel,
                   controller: playback,
                   onClose: () => setState(() => panel = _SidePanel.none),
-                  onExpand: () => setState(() => expanded = true),
+                  onExpand: expandPlayer,
                 ),
               ),
             Positioned(
@@ -282,7 +328,7 @@ class _MacShellState extends State<MacShell> {
                 panel: panel,
                 onLyrics: () => togglePanel(_SidePanel.lyrics),
                 onQueue: () => togglePanel(_SidePanel.queue),
-                onExpand: () => setState(() => expanded = true),
+                onExpand: expandPlayer,
                 onOpenCollection: openCollection,
               ),
             ),
@@ -293,19 +339,27 @@ class _MacShellState extends State<MacShell> {
                     Positioned.fill(
                       child: FullPlayer(
                         controller: playback,
-                        topInset: 32,
+                        topInset: DymuseTokens.windows ? 54 : 32,
                         onClose: () => setState(() => expanded = false),
                         onOpenCollection: openCollection,
                       ),
                     ),
-                    // 顶部空白可拖动窗口；左侧留给原生红黄绿按钮。
-                    Positioned(
-                      left: 84,
-                      right: 0,
-                      top: 0,
-                      height: 32,
-                      child: WindowDragArea(window: widget.window),
-                    ),
+                    // Windows 的窗口控件始终保留在展开播放器上方。
+                    if (DymuseTokens.windows)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        child: WindowTitleBar(window: widget.window),
+                      )
+                    else
+                      Positioned(
+                        left: 84,
+                        right: 0,
+                        top: 0,
+                        height: 32,
+                        child: WindowDragArea(window: widget.window),
+                      ),
                   ],
                 ),
               ),
@@ -324,10 +378,7 @@ class _MacShellState extends State<MacShell> {
           window: widget.window,
         )
       : mode == MusicMode.netease && browser.section == 'intelligence'
-      ? IntelligencePage(
-          playback: playback,
-          onExpand: () => setState(() => expanded = true),
-        )
+      ? IntelligencePage(playback: playback, onExpand: expandPlayer)
       : BrowsePage(
           key: ValueKey(mode),
           window: widget.window,
@@ -339,7 +390,9 @@ class _MacShellState extends State<MacShell> {
 
   /// 原生菜单栏：“控制”菜单对应 Apple Music 的播放操作；
   /// 空格在应用内处理，避免抢走搜索框输入。
-  Widget _menus(Widget child) => PlatformMenuBar(
+  Widget _menus(Widget child) => DymuseTokens.macOS ? _macMenus(child) : child;
+
+  Widget _macMenus(Widget child) => PlatformMenuBar(
     menus: [
       PlatformMenu(
         label: 'Dymuse',
@@ -646,8 +699,19 @@ class _MacSidebar extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 原生红黄绿按钮位于此拖动区。
-          SizedBox(height: 44, child: WindowDragArea(window: window)),
+          // macOS 留给原生按钮；Windows 使用相同位置的自绘红黄绿。
+          SizedBox(
+            height: 44,
+            child: DymuseTokens.macOS
+                ? WindowDragArea(window: window)
+                : Row(
+                    children: [
+                      const SizedBox(width: 14),
+                      TrafficLights(window: window),
+                      Expanded(child: WindowDragArea(window: window)),
+                    ],
+                  ),
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
             child: DymuseSearchField(
@@ -707,7 +771,7 @@ class _MacSidebar extends StatelessWidget {
                         onPressed: () => onNavigate('songs'),
                       ),
                       _SidebarItem(
-                        label: '我喜欢的音乐',
+                        label: '我喜欢',
                         icon: CupertinoIcons.heart,
                         selected: at('favorites'),
                         onPressed: () => onNavigate('favorites'),
@@ -727,7 +791,7 @@ class _MacSidebar extends StatelessWidget {
                         onPressed: () => onNavigate('subscriptions'),
                       ),
                       _SidebarItem(
-                        label: '我喜欢的音乐',
+                        label: '我喜欢',
                         icon: CupertinoIcons.heart,
                         selected: at('favorites'),
                         onPressed: () => onNavigate('favorites'),

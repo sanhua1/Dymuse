@@ -1,7 +1,7 @@
 name: dymuse
-description: Dymuse：网易云音乐与哔哩哔哩的 iOS / macOS / Android 播放器，所有数据只保存在本机。
+description: Dymuse 纯前端网易云播放器。
 publish_to: none
-version: 0.2.0+2
+version: 0.2.1+3
 environment:
   sdk: '>=3.11.0 <4.0.0'
   flutter: '>=3.41.0'
@@ -25,6 +25,7 @@ dependencies:
   pointycastle: 4.0.0
   qr_flutter: 4.1.0
   webview_flutter: ^4.14.1
+  webview_windows: 0.4.0
 dev_dependencies:
   integration_test:
     sdk: flutter

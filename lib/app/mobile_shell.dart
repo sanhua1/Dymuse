@@ -21,8 +21,8 @@ import '../playback/phone_player.dart';
 /// iPhone 外壳：参照 Apple Music（iOS 26）——
 /// 底部玻璃 Tab 栏与独立的搜索圆钮，Tab 栏上方悬浮迷你播放器，
 /// 点按迷你播放器以 Sheet 打开完整播放页。业务状态、页面和播放控制与桌面共用。
-/// 网易云 Tab：现在就听 / 每日推荐 / 我喜欢的音乐 / 资料库（我的歌单、播客）；
-/// 心动模式是顶部的全局按钮。哔哩哔哩 Tab：我的订阅 / 我喜欢的音乐 / 歌单 / 资料库；
+/// 网易云 Tab：现在就听 / 每日推荐 / 我喜欢 / 资料库（我的歌单、播客）；
+/// 心动模式是顶部的全局按钮。哔哩哔哩 Tab：我的订阅 / 我喜欢 / 歌单 / 资料库；
 /// 顶部的模式按钮在两种模式之间切换。
 class MobileShell extends StatefulWidget {
   const MobileShell({
@@ -57,12 +57,7 @@ const _neteaseTabs = [
     CupertinoIcons.play_circle_fill,
   ),
   _TabSpec('songs', '每日推荐', CupertinoIcons.calendar_today),
-  _TabSpec(
-    'favorites',
-    '我喜欢的音乐',
-    CupertinoIcons.heart,
-    CupertinoIcons.heart_fill,
-  ),
+  _TabSpec('favorites', '我喜欢', CupertinoIcons.heart, CupertinoIcons.heart_fill),
   _TabSpec(
     null,
     '资料库',
@@ -78,12 +73,7 @@ const _bilibiliTabs = [
     CupertinoIcons.rectangle_stack,
     CupertinoIcons.rectangle_stack_fill,
   ),
-  _TabSpec(
-    'favorites',
-    '我喜欢的音乐',
-    CupertinoIcons.heart,
-    CupertinoIcons.heart_fill,
-  ),
+  _TabSpec('favorites', '我喜欢', CupertinoIcons.heart, CupertinoIcons.heart_fill),
   _TabSpec('playlists', '歌单', CupertinoIcons.music_note_list),
   _TabSpec('library', '资料库', CupertinoIcons.collections),
 ];
@@ -568,50 +558,56 @@ class _MobileShellState extends State<MobileShell>
                                 ),
                                 KeyedSubtree(
                                   key: const ValueKey('tabs'),
-                                  child: glass.GlassTabBar.searchable(
-                                    tabs: [
-                                      for (final spec in tabs)
-                                        glass.GlassTab(
-                                          icon: Icon(spec.icon),
-                                          activeIcon: Icon(
-                                            spec.activeIcon ?? spec.icon,
+                                  // 标签文字只允许略微放大（与 Apple 对 Tab 栏的做法一致），
+                                  // 放得再大也保证四个标签与搜索按钮同一行放得下、不互相挤压。
+                                  child: MediaQuery.withClampedTextScaling(
+                                    maxScaleFactor: 1.1,
+                                    child: glass.GlassTabBar.searchable(
+                                      tabs: [
+                                        for (final spec in tabs)
+                                          glass.GlassTab(
+                                            icon: Icon(spec.icon),
+                                            activeIcon: Icon(
+                                              spec.activeIcon ?? spec.icon,
+                                            ),
+                                            label: spec.label,
                                           ),
-                                          label: spec.label,
-                                        ),
-                                    ],
-                                    selectedIndex: tab,
-                                    onTabSelected: selectTab,
-                                    labelFontSize: tabs.length > 2 ? 10 : 11,
-                                    isSearchActive: searching,
-                                    selectedIconColor: DymuseTokens.tint(
-                                      context,
+                                      ],
+                                      selectedIndex: tab,
+                                      onTabSelected: selectTab,
+                                      labelFontSize: tabs.length > 2 ? 10 : 11,
+                                      isSearchActive: searching,
+                                      selectedIconColor: DymuseTokens.tint(
+                                        context,
+                                      ),
+                                      selectedLabelColor: DymuseTokens.tint(
+                                        context,
+                                      ),
+                                      searchConfig: glass.GlassSearchBarConfig(
+                                        onSearchToggle: toggleSearch,
+                                        hintText: '搜索',
+                                        controller: search,
+                                        focusNode: searchFocus,
+                                        textInputAction: TextInputAction.search,
+                                        onSubmitted: submitSearch,
+                                        autoFocusOnExpand: false,
+                                        // 库默认的 × 只收起输入法；这里让它关闭搜索并回到原页面。
+                                        onCancelTap: () => toggleSearch(false),
+                                        cancelButtonSemanticLabel: '关闭搜索',
+                                      ),
+                                      quality: DymuseTokens.glassQuality,
+                                      // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
+                                      settings: DymuseTokens.android
+                                          ? glass.LiquidGlassSettings(
+                                              blur: 0,
+                                              thickness: 18,
+                                              glassColor:
+                                                  DymuseTokens.background(
+                                                    context,
+                                                  ).withValues(alpha: .96),
+                                            )
+                                          : null,
                                     ),
-                                    selectedLabelColor: DymuseTokens.tint(
-                                      context,
-                                    ),
-                                    searchConfig: glass.GlassSearchBarConfig(
-                                      onSearchToggle: toggleSearch,
-                                      hintText: '搜索',
-                                      controller: search,
-                                      focusNode: searchFocus,
-                                      textInputAction: TextInputAction.search,
-                                      onSubmitted: submitSearch,
-                                      autoFocusOnExpand: false,
-                                      // 库默认的 × 只收起输入法；这里让它关闭搜索并回到原页面。
-                                      onCancelTap: () => toggleSearch(false),
-                                      cancelButtonSemanticLabel: '关闭搜索',
-                                    ),
-                                    quality: DymuseTokens.glassQuality,
-                                    // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
-                                    settings: DymuseTokens.android
-                                        ? glass.LiquidGlassSettings(
-                                            blur: 0,
-                                            thickness: 18,
-                                            glassColor: DymuseTokens.background(
-                                              context,
-                                            ).withValues(alpha: .96),
-                                          )
-                                        : null,
                                   ),
                                 ),
                               ],
@@ -840,7 +836,7 @@ class _LibraryList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 每日推荐、我喜欢的音乐、心动模式已移到 Tab 与顶部全局按钮。
+    // 每日推荐、我喜欢、心动模式已移到 Tab 与顶部全局按钮。
     const entries = [
       ('playlists', '我的歌单', CupertinoIcons.music_note_list),
       ('podcasts', '播客', CupertinoIcons.mic_fill),

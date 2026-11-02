@@ -4,6 +4,9 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as glass;
 
 /// 语义 Token；各平台使用系统字体，不分发 Apple 字体。
 abstract final class DymuseTokens {
+  /// Windows 复用桌面视觉，窗口和键盘操作仍由本机处理。
+  static bool get windows => defaultTargetPlatform == TargetPlatform.windows;
+
   /// macOS 保留原生标题栏、窗口按钮和菜单；判断与测试宿主无关。
   static bool get macOS => defaultTargetPlatform == TargetPlatform.macOS;
 
@@ -19,8 +22,8 @@ abstract final class DymuseTokens {
   /// Apple 平台共用系统字体与完整玻璃管线。
   static bool get apple => macOS || iOS;
 
-  /// Liquid Glass 风格界面（Cupertino 控件、玻璃按钮）：Apple 平台与 Android。
-  static bool get liquid => apple || android;
+  /// 受支持平台共用玻璃组件，渲染质量由各平台单独选择。
+  static bool get liquid => apple || android || windows;
 
   /// Apple 的 Impeller(Metal) 使用完整玻璃管线；Windows 与 Android 用轻量着色器
   /// （Android 上完整管线每块玻璃都做实时折射，实测明显卡顿）。
@@ -28,7 +31,7 @@ abstract final class DymuseTokens {
       apple ? glass.GlassQuality.premium : glass.GlassQuality.standard;
 
   /// Apple 与 Android 交给系统字体（SF/苹方、Roboto），Windows 指定 Segoe UI。
-  static String? get fontFamily => liquid ? null : 'Segoe UI';
+  static String? get fontFamily => apple || android ? null : 'Segoe UI';
 
   /// 默认主题色（玫红）；用户可在设置里换成 [AccentColor] 中的其他颜色。
   static const accent = Color(0xFFB83258);

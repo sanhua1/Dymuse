@@ -16,7 +16,12 @@ class _CountingBackend extends LocalBackend {
     : super(prefs, client, BilibiliBackend(prefs, BilibiliClient()));
   int calls = 0;
   @override
-  Future<dynamic> handle(String method, String path, Map<String, dynamic>? query, Map<String, dynamic>? body) async => {'n': ++calls};
+  Future<dynamic> handle(
+    String method,
+    String path,
+    Map<String, dynamic>? query,
+    Map<String, dynamic>? body,
+  ) async => {'n': ++calls};
 }
 
 void main() {

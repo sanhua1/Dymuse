@@ -7,7 +7,7 @@ class LoginRequiredView extends StatelessWidget {
   const LoginRequiredView({super.key, required this.api, this.title});
   final ApiClient api;
 
-  /// 页面名，例如“我喜欢的音乐”；为空时用通用标题。
+  /// 页面名，例如“我喜欢”；为空时用通用标题。
   final String? title;
   @override
   Widget build(BuildContext context) => StatusMessage(

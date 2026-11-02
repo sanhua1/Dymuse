@@ -56,10 +56,7 @@ Map<String, String> weapi(Map<String, Object?> object, {String? secretKey}) {
   final key = secretKey ?? randomKey();
   final first = base64.encode(_aes(_bytes(text), _presetKey, iv: _iv));
   final params = base64.encode(_aes(_bytes(first), key, iv: _iv));
-  return {
-    'params': params,
-    'encSecKey': _rsa(key.split('').reversed.join()),
-  };
+  return {'params': params, 'encSecKey': _rsa(key.split('').reversed.join())};
 }
 
 Map<String, String> linuxapi(Map<String, Object?> object) => {
@@ -68,7 +65,9 @@ Map<String, String> linuxapi(Map<String, Object?> object) => {
 
 Map<String, String> eapi(String url, Map<String, Object?> object) {
   final text = jsonEncode(object);
-  final digest = hash.md5.convert(utf8.encode('nobody${url}use${text}md5forencrypt'));
+  final digest = hash.md5.convert(
+    utf8.encode('nobody${url}use${text}md5forencrypt'),
+  );
   final data = '$url-36cd479b6b5-$text-36cd479b6b5-$digest';
   return {'params': _hex(_aes(_bytes(data), _eapiKey)).toUpperCase()};
 }
@@ -86,6 +85,11 @@ String eapiDecrypt(String hex) {
 String weapiDecrypt(String params, String secretKey) {
   final first = _aes(base64.decode(params), secretKey, iv: _iv, encrypt: false);
   return utf8.decode(
-    _aes(base64.decode(utf8.decode(first)), _presetKey, iv: _iv, encrypt: false),
+    _aes(
+      base64.decode(utf8.decode(first)),
+      _presetKey,
+      iv: _iv,
+      encrypt: false,
+    ),
   );
 }

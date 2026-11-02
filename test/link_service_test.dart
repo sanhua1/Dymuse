@@ -43,7 +43,8 @@ void main() {
     await probe.close();
     url = 'http://127.0.0.1:$port';
     process = await Process.start(
-      'python3',
+      Platform.environment['DYMUSE_TEST_PYTHON'] ??
+          (Platform.isWindows ? 'py' : 'python3'),
       ['server/server.py', 'serve'],
       environment: {
         'DYMUSE_STATE': state.path,
@@ -66,7 +67,7 @@ void main() {
 
   tearDownAll(() async {
     process.kill();
-    await state.delete(recursive: true);
+    // 保留隔离测试数据，便于失败后排查；不自动清理文件。
   });
 
   LinkService service() {

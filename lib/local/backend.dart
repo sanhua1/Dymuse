@@ -389,11 +389,11 @@ class LocalBackend {
           (item['specialType'] as num?)?.toInt() == 5 &&
           '${item['creator']?['userId']}' == owner,
     );
-    if (liked.isEmpty) _fail(404, 'LIKED_PLAYLIST_NOT_FOUND', '未找到我喜欢的音乐歌单。');
+    if (liked.isEmpty) _fail(404, 'LIKED_PLAYLIST_NOT_FOUND', '未找到我喜欢歌单。');
     final item = liked.first;
     return {
       'id': '${item['id']}',
-      'name': '${item['name'] ?? '我喜欢的音乐'}',
+      'name': '${item['name'] ?? '我喜欢'}',
       'coverUrl': item['coverImgUrl'] ?? item['picUrl'],
       'trackCount': (item['trackCount'] as num?)?.toInt() ?? 0,
       'isLiked': true,

@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart' as hash;
+
 import 'crypto.dart' as enc;
 
 enum Crypto { eapi, weapi }
@@ -113,6 +115,9 @@ class NeteaseClient {
     Crypto crypto = Crypto.eapi,
     bool checkToken = false,
 
+    /// 不按业务码判失败，原样返回（登录需要读 8821、502 等码和提示）。
+    bool lenient = false,
+
     /// 只对这一次请求改用另一份 Cookie（取链账号）；响应里的 Set-Cookie 不写回本机会话。
     Map<String, String>? cookieOverride,
   }) async {
@@ -167,7 +172,7 @@ class NeteaseClient {
     final code = (json['code'] as num?)?.toInt();
     // 与 request.js 的 SPECIAL_STATUS_CODES 一致：这些业务码不算失败。
     const special = {200, 201, 302, 400, 502, 800, 801, 802, 803};
-    if (code != null && !special.contains(code)) {
+    if (!lenient && code != null && !special.contains(code)) {
       throw NeteaseError(
         code == 301 || code == 401
             ? 'NETEASE_SESSION_EXPIRED'
@@ -246,6 +251,82 @@ class NeteaseClient {
 
   Future<Map<String, dynamic>> account() =>
       request('/api/w/nuser/account/get', {}, crypto: Crypto.weapi);
+
+  /// 向手机发送登录验证码。
+  Future<void> sendCaptcha(String phone, {String countryCode = '86'}) async {
+    final body = await request(
+      '/api/sms/captcha/sent',
+      {
+        'ctcode': countryCode,
+        'secrete': 'music_middleuser_pclogin',
+        'cellphone': phone,
+      },
+      crypto: Crypto.weapi,
+      lenient: true,
+    );
+    if (_code(body) == 200) return;
+    throw NeteaseError(
+      _isRisk(body) ? loginRisk : 'CAPTCHA_FAILED',
+      _loginMessage(body, '验证码发送失败'),
+      400,
+    );
+  }
+
+  /// 手机号登录：[captcha] 有值时用验证码，否则用密码（MD5 后提交）。
+  /// 成功后 Cookie 已由 Set-Cookie 写入；失败抛 [NeteaseError]，
+  /// 需要安全验证时 code 为 [loginRisk]。
+  Future<void> loginCellphone({
+    required String phone,
+    String? password,
+    String? captcha,
+    String countryCode = '86',
+  }) async {
+    final byCode = captcha != null && captcha.isNotEmpty;
+    final body = await request(
+      '/api/w/login/cellphone',
+      {
+        'type': '1',
+        'https': 'true',
+        'phone': phone,
+        'countrycode': countryCode,
+        if (byCode)
+          'captcha': captcha
+        else
+          'password': hash.md5.convert(utf8.encode(password ?? '')).toString(),
+        'remember': 'true',
+        'secureCaptcha': '',
+      },
+      crypto: Crypto.weapi,
+      lenient: true,
+    );
+    if (_code(body) == 200 && loggedIn) return;
+    throw NeteaseError(
+      _isRisk(body) ? loginRisk : 'LOGIN_FAILED',
+      _loginMessage(body, '登录失败'),
+      401,
+    );
+  }
+
+  /// 登录被风控拦下，需要短信验证码。
+  static const loginRisk = 'LOGIN_RISK';
+  static const _riskCodes = {8821, -462, -460, 10004};
+  static int? _code(Map<String, dynamic> body) =>
+      (body['code'] as num?)?.toInt();
+  static bool _isRisk(Map<String, dynamic> body) =>
+      _riskCodes.contains(_code(body));
+
+  static String _loginMessage(Map<String, dynamic> body, String fallback) {
+    final code = _code(body);
+    if (_isRisk(body)) return '需要安全验证，请改用短信验证码。';
+    final text = '${body['message'] ?? body['msg'] ?? ''}'.trim();
+    return switch (code) {
+      501 => '账号不存在。',
+      502 => '手机号或密码错误。',
+      503 => '验证码错误或已过期。',
+      509 => '密码错误次数过多，请稍后再试或改用验证码。',
+      _ => text.isEmpty ? '$fallback（${code ?? '未知'}）。' : text,
+    };
+  }
 
   void logout() {
     for (final key in [

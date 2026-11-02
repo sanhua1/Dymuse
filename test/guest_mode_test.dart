@@ -47,14 +47,17 @@ void main() {
       expect(session.user?['id'], 'guest');
     });
 
-    test('游客要登录：回到登录页，并且仍能申请二维码', () async {
+    test('游客要登录：只弹出登录页，游客身份不变，申请二维码的连接还在', () async {
       final session = await newSession();
       await session.enterGuest();
-      await session.startLogin();
-      expect(session.user, isNull);
-      expect(session.guest, isFalse);
-      expect(session.api.guest, isFalse);
-      expect(session.preferences.containsKey('netease.guest'), isFalse);
+      var shown = 0;
+      session.loginPresenter = () => shown++;
+      session.startLogin();
+      session.api.requestLogin();
+      expect(shown, 2);
+      expect(session.guest, isTrue);
+      expect(session.user?['id'], 'guest');
+      expect(session.preferences.getBool('netease.guest'), isTrue);
       expect(session.api.backend, isNotNull);
     });
 

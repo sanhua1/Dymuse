@@ -771,7 +771,7 @@ class Catalog extends ChangeNotifier {
       final item = data['playlist'] as Json;
       collection = Collection(
         item['id'].toString(),
-        '我喜欢的音乐',
+        '我喜欢',
         '${item['trackCount']} 首歌曲',
         item['coverUrl'] as String?,
         'playlist',
@@ -799,7 +799,7 @@ class Catalog extends ChangeNotifier {
           nextOffset: (data['nextOffset'] as num?)?.toInt(),
           source: Collection(
             collection.id,
-            liked ? '我喜欢的音乐' : metadata['name'].toString(),
+            liked ? '我喜欢' : metadata['name'].toString(),
             '${data['total']} 首歌曲',
             metadata['coverUrl'] as String?,
             'playlist',
