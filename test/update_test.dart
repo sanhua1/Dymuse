@@ -168,4 +168,15 @@ void main() {
       expect(s.githubFirst, isTrue);
     });
   });
+
+  test('Release 网页地址按 tag 拼出', () {
+    expect(
+      giteeSource.pageUrl('v0.2.1'),
+      'https://gitee.com/sanhua1/dymuserelease/releases/tag/v0.2.1',
+    );
+    expect(
+      githubSource.pageUrl('v0.2.1'),
+      'https://github.com/sanhua1/Dymuse/releases/tag/v0.2.1',
+    );
+  });
 }

@@ -12,7 +12,7 @@ const appBuild = 3;
 
 /// 一个发布源：用它的接口读取最新 Release，再按 tag 和文件名拼出下载地址。
 class UpdateSource {
-  const UpdateSource(this.name, this.api, this.assetBase);
+  const UpdateSource(this.name, this.api, this.assetBase, [this.pageBase = '']);
   final String name;
 
   /// `releases/latest` 接口地址。
@@ -21,17 +21,23 @@ class UpdateSource {
   /// 下载地址前缀；完整地址是 `<前缀>/<tag>/<文件名>`。
   final String assetBase;
   String assetUrl(String tag, String file) => '$assetBase/$tag/$file';
+
+  /// Release 网页前缀；完整地址是 `<前缀>/<tag>`，iOS 让用户去这里自己下载。
+  final String pageBase;
+  String pageUrl(String tag) => '$pageBase/$tag';
 }
 
 const giteeSource = UpdateSource(
   'Gitee',
   'https://gitee.com/api/v5/repos/sanhua1/dymuserelease/releases/latest',
   'https://gitee.com/sanhua1/dymuserelease/releases/download',
+  'https://gitee.com/sanhua1/dymuserelease/releases/tag',
 );
 const githubSource = UpdateSource(
   'GitHub',
   'https://api.github.com/repos/sanhua1/Dymuse/releases/latest',
   'https://github.com/sanhua1/Dymuse/releases/download',
+  'https://github.com/sanhua1/Dymuse/releases/tag',
 );
 
 /// 联调用：`--dart-define=DYMUSE_UPDATE_API=...` 与 `DYMUSE_UPDATE_BASE=...` 编译时才存在，
@@ -121,8 +127,10 @@ class UpdateService extends ChangeNotifier {
     return 'ios';
   }
 
-  /// 本平台能否在应用内下载并安装（目前只有 Windows）。
-  bool get canInstall => Platform.isWindows && platform == 'windows-x64';
+  /// 本平台能否在应用内下载并安装（Windows 原地更新、Android 交给系统安装器）。
+  bool get canInstall =>
+      (Platform.isWindows && platform == 'windows-x64') ||
+      (Platform.isAndroid && platform == 'android-arm64');
 
   String? get ignoredVersion => preferences.getString(ignoredKey);
   Future<void> ignore(String version) =>
@@ -133,6 +141,9 @@ class UpdateService extends ChangeNotifier {
     await preferences.setBool(githubFirstKey, value);
     notifyListeners();
   }
+
+  /// 按当前偏好排好的发布源（默认 Gitee 在前）。
+  List<UpdateSource> get sources => _ordered;
 
   List<UpdateSource> get _ordered {
     if (_sources.length < 2 || !githubFirst) return _sources;

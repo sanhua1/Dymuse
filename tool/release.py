@@ -46,7 +46,10 @@ def gitee(token, method, path, fields=None, file=None):
     """调用 Gitee v5 接口；file 为 (字段名, 本地路径, 上传文件名) 时走 multipart。"""
     url = f'{GITEE_API}{path}'
     fields = dict(fields or {}, access_token=token)
-    if file is None:
+    if method in ('GET', 'DELETE'):
+        url += '?' + urllib.parse.urlencode(fields)
+        body, headers = None, {}
+    elif file is None:
         body = urllib.parse.urlencode(fields).encode()
         headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     else:
@@ -84,6 +87,10 @@ def main():
     parser.add_argument('--notes', required=True, help='更新说明（Markdown/纯文本文件）')
     for key in PLATFORMS:
         parser.add_argument(f'--{key}', help=f'{key} 安装包路径')
+    parser.add_argument('--extra', action='append', default=[],
+                        help='额外上传但不写进清单的文件（例如 iOS 未签名 IPA），可重复')
+    parser.add_argument('--replace', action='store_true',
+                        help='该版本已发布：覆盖同名文件（GitHub --clobber；Gitee 先删同名附件再传）')
     parser.add_argument('--out', default='release-out', help='生成清单与改名后安装包的目录')
     parser.add_argument('--gitee-token-file')
     parser.add_argument('--publish', action='store_true', help='真正发布（默认只演练）')
@@ -128,21 +135,30 @@ def main():
         return
 
     # latest.json 最后上传：客户端读到清单时，安装包一定已经就位。
-    upload_order = files + [manifest]
+    upload_order = files + args.extra + [manifest]
 
     if not args.skip_github:
         if not shutil.which('gh'):
             raise SystemExit('找不到 gh；可加 --skip-github 先发 Gitee。')
-        subprocess.run(
-            ['gh', 'release', 'create', tag, '--repo', GITHUB_REPO, '--draft',
-             '--title', f'Dymuse {args.version}', '--notes-file', args.notes, *upload_order],
-            check=True,
-        )
-        subprocess.run(
-            ['gh', 'release', 'edit', tag, '--repo', GITHUB_REPO, '--draft=false', '--latest'],
-            check=True,
-        )
-        print('GitHub Release 已发布。')
+        if args.replace:
+            # 清单放最后传，客户端读到新清单时安装包已就位。
+            for path in upload_order:
+                subprocess.run(
+                    ['gh', 'release', 'upload', tag, path, '--repo', GITHUB_REPO, '--clobber'],
+                    check=True,
+                )
+            print('GitHub Release 文件已覆盖。')
+        else:
+            subprocess.run(
+                ['gh', 'release', 'create', tag, '--repo', GITHUB_REPO, '--draft',
+                 '--title', f'Dymuse {args.version}', '--notes-file', args.notes, *upload_order],
+                check=True,
+            )
+            subprocess.run(
+                ['gh', 'release', 'edit', tag, '--repo', GITHUB_REPO, '--draft=false', '--latest'],
+                check=True,
+            )
+            print('GitHub Release 已发布。')
 
     if not args.skip_gitee:
         token = os.environ.get('GITEE_TOKEN', '')
@@ -151,10 +167,21 @@ def main():
                 token = handle.read().strip()
         if not token:
             raise SystemExit('缺少 Gitee 令牌（GITEE_TOKEN 或 --gitee-token-file）。')
-        release = gitee(token, 'POST', f'/repos/{GITEE_REPO}/releases', {
-            'tag_name': tag, 'name': f'Dymuse {args.version}', 'body': notes,
-            'prerelease': 'false', 'target_commitish': 'master',
-        })
+        if args.replace:
+            release = gitee(token, 'GET', f'/repos/{GITEE_REPO}/releases/tags/{tag}')
+            names = {os.path.basename(path) for path in upload_order}
+            attachments = gitee(token, 'GET', f'/repos/{GITEE_REPO}/releases/{release["id"]}/attach_files')
+            for attach in attachments:
+                # 只删要被替换的同名附件；源码包等其他附件不动。
+                if attach.get('name') in names and attach.get('id'):
+                    gitee(token, 'DELETE',
+                          f'/repos/{GITEE_REPO}/releases/{release["id"]}/attach_files/{attach["id"]}')
+                    print(f'Gitee 已删除旧附件 {attach["name"]}')
+        else:
+            release = gitee(token, 'POST', f'/repos/{GITEE_REPO}/releases', {
+                'tag_name': tag, 'name': f'Dymuse {args.version}', 'body': notes,
+                'prerelease': 'false', 'target_commitish': 'master',
+            })
         for path in upload_order:
             gitee(token, 'POST', f'/repos/{GITEE_REPO}/releases/{release["id"]}/attach_files',
                   file=('file', path, os.path.basename(path)))

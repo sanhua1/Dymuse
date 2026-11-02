@@ -75,11 +75,11 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
     );
   }
 
-  /// 启动后等会话恢复完、界面稳定，再静默检查一次更新。
+  /// 首帧画出、会话恢复完后立即静默检查一次更新（没有人为延迟，弹出时间取决于网络）。
   Future<void> _startupUpdateCheck() async {
     final update = widget.update;
     if (update == null) return;
-    await Future<void>.delayed(const Duration(seconds: 4));
+    await WidgetsBinding.instance.endOfFrame;
     while (widget.session.restoring) {
       await Future<void>.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;

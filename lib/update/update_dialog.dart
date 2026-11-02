@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../design_system/tokens.dart';
+import 'android_installer.dart';
 import 'update_service.dart';
 import 'windows_installer.dart';
 
@@ -79,6 +80,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   double? _progress;
   String? _error;
 
+  /// 已下载并校验好的安装包；Android 授权“安装未知应用”后重试时不必重新下载。
+  File? _package;
+
   UpdateInfo get _info => widget.info;
 
   @override
@@ -93,7 +97,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   Future<void> _update() async {
     final service = widget.service;
     if (!service.canInstall) {
-      // 其他平台暂时交给浏览器下载（Android 应用内安装之后再做）。
+      // macOS 等暂时交给浏览器下载。
       final url = _info.downloadUrls.isEmpty ? null : _info.downloadUrls.first;
       if (url != null) {
         unawaited(
@@ -110,7 +114,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       _error = null;
     });
     try {
-      final file = await service.download(
+      final file = _package ?? await service.download(
         _info,
         onProgress: (got, total) {
           if (!mounted) return;
@@ -122,7 +126,27 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           });
         },
       );
+      _package = file;
       if (!mounted) return;
+      if (Platform.isAndroid) {
+        final (result, detail) = await installAndroidApk(file);
+        if (!mounted) return;
+        switch (result) {
+          case AndroidInstallResult.started:
+            Navigator.pop(context);
+          case AndroidInstallResult.needPermission:
+            setState(() {
+              _phase = _Phase.failed;
+              _error = '请在刚打开的系统设置里允许 Dymuse 安装应用，然后返回这里点“重试”。';
+            });
+          case AndroidInstallResult.failed:
+            setState(() {
+              _phase = _Phase.failed;
+              _error = detail.isEmpty ? '无法打开系统安装器。' : '无法打开系统安装器。\n$detail';
+            });
+        }
+        return;
+      }
       setState(() {
         _status = '校验通过，正在更新并重启…';
         _progress = null;
@@ -136,6 +160,38 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         _error = '$error';
       });
     }
+  }
+
+  /// iOS：选 Gitee 还是 GitHub，用浏览器打开对应的 Release 页面。
+  Future<void> _chooseDownload() async {
+    final sources = widget.service.sources;
+    final picked = await showCupertinoModalPopup<UpdateSource>(
+      context: context,
+      builder: (sheet) => CupertinoActionSheet(
+        title: const Text('选择下载来源'),
+        actions: [
+          for (final source in sources)
+            CupertinoActionSheetAction(
+              onPressed: () => Navigator.pop(sheet, source),
+              child: Text(
+                source.name == 'Gitee' ? 'Gitee（国内推荐）' : source.name,
+              ),
+            ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          onPressed: () => Navigator.pop(sheet),
+          child: const Text('取消'),
+        ),
+      ),
+    );
+    if (picked == null) return;
+    unawaited(
+      launchUrl(
+        Uri.parse(picked.pageUrl(_info.tag)),
+        mode: LaunchMode.externalApplication,
+      ),
+    );
+    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -213,13 +269,19 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           child: const Text('重试'),
         ),
       ],
-      // 没有本平台安装包（例如 iOS）只提示，不提供忽略与更新。
+      // 没有本平台安装包（例如 iOS）只提示，不提供忽略与更新；iOS 可以去网页自己下载。
       _Phase.offer when !hasPackage => [
         CupertinoDialogAction(
-          isDefaultAction: true,
+          isDefaultAction: !Platform.isIOS,
           onPressed: () => Navigator.pop(context),
           child: const Text('知道了'),
         ),
+        if (Platform.isIOS)
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: _chooseDownload,
+            child: const Text('去下载'),
+          ),
       ],
       _Phase.offer => [
         CupertinoDialogAction(
