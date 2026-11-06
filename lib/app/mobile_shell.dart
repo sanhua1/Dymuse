@@ -430,11 +430,12 @@ class _MobileShellState extends State<MobileShell>
       listenable: Listenable.merge([
         playback,
         widget.appearance,
-        sheetCovering,
+        sheetProgress,
         ...browsers.values,
       ]),
       builder: (context, _) {
-        final covered = sheetCovering.value;
+        // 顶部模糊随 Sheet 的出现进度线性地淡出、收起时线性地淡入（一动就开始变化）。
+        final fade = (1 - sheetProgress.value).clamp(0.0, 1.0);
         final showMini = playback.track != null;
         // 内容在悬浮 Tab 栏与迷你播放器下方滚动，末尾留出它们的高度。
         final progressOn = widget.appearance.miniProgressShown;
@@ -450,15 +451,8 @@ class _MobileShellState extends State<MobileShell>
               // 内容延伸到顶栏下方，滚动时在顶栏后面渐进模糊（iOS 26 滚动边缘效果），
               // 而不是在顶栏下沿被纯色截断。
               Positioned.fill(
-                child: glass.GlassScrollEdgeEffect(
-                  // Android 的 GPU 吃不消全屏实时模糊，改用渐变遮罩。
-                  style: DymuseTokens.android
-                      ? glass.GlassScrollEdgeStyle.soft
-                      : glass.GlassScrollEdgeStyle.blur,
-                  topFadeHeight: covered
-                      ? 0
-                      : MediaQuery.paddingOf(context).top + _topBar + 16,
-                  fadeBottom: false,
+                child: _topFade(
+                  fade,
                   child: _PageGestures(
                     pageKey: _pageKey(),
                     direction: _direction,
@@ -598,15 +592,16 @@ class _MobileShellState extends State<MobileShell>
                                       quality: DymuseTokens.glassQuality,
                                       // 与其他玻璃面板一致：无模糊，垫半透明底色保证可读。
                                       settings: DymuseTokens.android
-                                          ? glass.LiquidGlassSettings(
-                                              blur: 0,
-                                              thickness: 18,
-                                              glassColor:
-                                                  DymuseTokens.background(
-                                                    context,
-                                                  ).withValues(alpha: .96),
-                                            )
-                                          : null,
+                                          ? androidGlassSettings(context)
+                                          // 库里的标签栏自带一套玻璃参数，不跟全局主题走；
+                                          // 这里显式传入（与迷你播放器相同），才能随“玻璃效果”变化。
+                                          : DymuseTokens.frostLerp(
+                                              kBarGlassSettings,
+                                              widget.appearance.glassFrost,
+                                              CupertinoTheme.brightnessOf(
+                                                context,
+                                              ),
+                                            ),
                                     ),
                                   ),
                                 ),
@@ -656,6 +651,54 @@ class _MobileShellState extends State<MobileShell>
         }
       },
       child: shell,
+    );
+  }
+
+  /// 主页顶部的淡出带；[fade] 为 1 时完整，0 时消失（Sheet 盖住主页时随进度渐变）。
+  /// iOS 用库的渐进模糊，只调模糊强度、范围不动；Android 的 GPU 吃不消实时模糊，
+  /// 自己画一条底色渐变，用整体透明度做同样的渐变。
+  Widget _topFade(double fade, {required Widget child}) {
+    final height = MediaQuery.paddingOf(context).top + _topBar + 16;
+    if (!DymuseTokens.android) {
+      return glass.GlassScrollEdgeEffect(
+        style: glass.GlassScrollEdgeStyle.blur,
+        topFadeHeight: height,
+        maxSigma: 18 * fade,
+        fadeBottom: false,
+        child: child,
+      );
+    }
+    final color = DymuseTokens.background(context);
+    return Stack(
+      children: [
+        child,
+        Positioned(
+          left: 0,
+          top: 0,
+          right: 0,
+          height: height,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: fade,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      color,
+                      color.withValues(alpha: .8),
+                      color.withValues(alpha: .3),
+                      color.withValues(alpha: 0),
+                    ],
+                    stops: const [0, .35, .7, 1],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -495,6 +495,13 @@ class PlaybackController extends ChangeNotifier {
               as Json;
       final links = data['data'] as List? ?? [];
       final link = links.isEmpty ? null : links.first['url'];
+      if (links.isNotEmpty) {
+        Diag.log(
+          'url id=${track.id} asked=${quality.match(detail)} '
+          'got=${links.first['level']} br=${links.first['br']} '
+          'trial=${links.first['freeTrialInfo'] != null}',
+        );
+      }
       // 试听片段（非会员 30 秒）不缓存，以免以后一直播放片段。
       final trial = links.isEmpty ? null : links.first['freeTrialInfo'];
       if (trial != null && trial != 'null') cacheKey = null;
@@ -513,6 +520,10 @@ class PlaybackController extends ChangeNotifier {
   Future<void> _load(int intent, {required bool play, int position = 0}) async {
     if (items.isEmpty || index >= items.length) return;
     final item = items[index], key = _key(item);
+    Diag.log(
+      'load start mode=${mode.name} id=${item['id']} index=$index/${items.length} '
+      'play=$play pos=${position}ms quality=${quality.level}',
+    );
     loading = true;
     error = null;
     if (current == null && pending?.id != item['id'].toString()) {
@@ -533,7 +544,14 @@ class PlaybackController extends ChangeNotifier {
               cacheKey: ready.cacheKey,
             )
           : await _resolve(item);
-      if (intent != _intent) return;
+      if (intent != _intent) {
+        Diag.log('load superseded id=${item['id']}');
+        return;
+      }
+      Diag.log(
+        'load resolved id=${item['id']} prefetched=${ready != null && ready.key == key} '
+        'cached=${resolved.url.startsWith('https://cache.dymuse.invalid')}',
+      );
       current = resolved.track;
       pending = null;
       listening.begin(resolved.track, snapshot);
@@ -687,6 +705,7 @@ class PlaybackController extends ChangeNotifier {
   }
 
   Future<void> next({bool automatic = false}) {
+    Diag.log('next automatic=$automatic index=$index/${items.length}');
     if (items.isEmpty) return Future.value();
     if (automatic && repeat == 'one') return select(index);
     if (shuffle && items.length > 1) {
@@ -736,6 +755,7 @@ class PlaybackController extends ChangeNotifier {
   }
 
   Future<void> previous() async {
+    Diag.log('previous index=$index pos=${engine.position.value.inSeconds}s');
     if (engine.position.value.inSeconds > 3) {
       await seek(Duration.zero);
       return;
@@ -754,6 +774,10 @@ class PlaybackController extends ChangeNotifier {
   }
 
   Future<void> toggle() => _command(() async {
+    Diag.log(
+      'toggle playing=${engine.playing.value} current=${current?.id} '
+      'loading=$loading',
+    );
     if (current == null && items.isNotEmpty) {
       final intent = ++_intent;
       await _load(
@@ -771,6 +795,7 @@ class PlaybackController extends ChangeNotifier {
     await _save();
   });
   Future<void> retry() {
+    Diag.log('retry id=${current?.id} error=$error');
     final intent = ++_intent;
     return _command(
       () => _load(

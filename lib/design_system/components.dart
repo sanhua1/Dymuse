@@ -42,9 +42,8 @@ class GlassPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final solid =
-        media.highContrast ||
-        AppearanceScope.of(context)?.reduceTransparency == true;
+    final appearance = AppearanceScope.of(context);
+    final solid = media.highContrast || appearance?.reduceTransparency == true;
     if (solid) {
       return DecoratedBox(
         decoration: BoxDecoration(
@@ -55,27 +54,33 @@ class GlassPanel extends StatelessWidget {
         child: Padding(padding: padding, child: child),
       );
     }
-    final panel = glass.GlassContainer(
+    return glass.GlassContainer(
       quality: lightweight
           ? glass.GlassQuality.standard
           : DymuseTokens.glassQuality,
       shape: glass.LiquidRoundedSuperellipse(borderRadius: radius),
       useOwnLayer: true,
-      settings: DymuseTokens.android ? null : settings,
+      settings: DymuseTokens.android
+          ? androidGlassSettings(context)
+          : DymuseTokens.frostLerp(
+              settings,
+              appearance?.glassFrost ?? 0,
+              CupertinoTheme.brightnessOf(context),
+            ),
       padding: padding,
       child: child,
     );
-    // Android 没有背后模糊，下面的封面和文字会原样透上来；垫一层半透明底色保证可读。
-    if (!DymuseTokens.android) return panel;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: DymuseTokens.background(context).withValues(alpha: .82),
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      child: panel,
-    );
   }
 }
+
+/// Android 的玻璃：没有背后模糊（为了流畅），垫一层近乎不透明的底色保证可读。
+/// 面板、迷你播放器和底部标签栏共用这一份，样式才一致。
+glass.LiquidGlassSettings androidGlassSettings(BuildContext context) =>
+    glass.LiquidGlassSettings(
+      blur: 0,
+      thickness: 18,
+      glassColor: DymuseTokens.background(context).withValues(alpha: .96),
+    );
 
 /// 统一键盘焦点、悬停及语义；桌面操作区保持 44 点目标。
 class ActionButton extends StatefulWidget {
@@ -265,42 +270,53 @@ class RemoteArtwork extends StatelessWidget {
   final String? url;
   final double size, radius;
   final String seed;
-  @override
-  Widget build(BuildContext context) {
-    var resolved = url == null || url!.trim().isEmpty
-        ? null
-        : Uri.parse(api.server).resolve(url!);
+
+  /// 把业务里的封面地址整理成可请求的地址与请求头（网易云换 HTTPS 和应用标识，
+  /// 只向自己的服务发送令牌）；[pixels] 是需要的像素宽度，用来换缩略图。没有封面返回 null。
+  static ({String url, Map<String, String> headers})? request(
+    ApiClient api,
+    String? url,
+    double pixels,
+  ) {
+    if (url == null || url.trim().isEmpty) return null;
+    var resolved = Uri.parse(api.server).resolve(url);
     final service = Uri.parse(api.server);
     final neteaseImage =
-        resolved != null &&
-        (resolved.host == 'music.126.net' ||
-            resolved.host.endsWith('.music.126.net'));
+        resolved.host == 'music.126.net' ||
+        resolved.host.endsWith('.music.126.net');
     // 网易云图片服务拒绝 Dart 默认 User-Agent，图片使用应用标识和 HTTPS。
     if (neteaseImage && resolved.scheme == 'http') {
       resolved = resolved.replace(scheme: 'https');
     }
-    if (resolved != null) {
-      resolved = thumbnailAddress(
-        resolved,
-        size * MediaQuery.devicePixelRatioOf(context),
-      );
-    }
+    resolved = thumbnailAddress(resolved, pixels);
     // 只向同一服务发送令牌；远端专辑图片不能获得 Bearer。
     // 本机伪地址不是 http(s)，不能用 Uri.origin，按协议/主机/端口比较。
     final own =
-        resolved != null &&
         resolved.scheme == service.scheme &&
         resolved.host == service.host &&
         resolved.port == service.port;
-    return Artwork(
-      url: resolved?.toString(),
-      size: size,
-      seed: seed,
-      radius: radius,
+    return (
+      url: resolved.toString(),
       headers: {
         if (neteaseImage) 'User-Agent': 'Dymuse/0.1.0',
         if (own && api.token != null) 'Authorization': 'Bearer ${api.token}',
       },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final image = request(
+      api,
+      url,
+      size * MediaQuery.devicePixelRatioOf(context),
+    );
+    return Artwork(
+      url: image?.url,
+      size: size,
+      seed: seed,
+      radius: radius,
+      headers: image?.headers,
     );
   }
 }
@@ -1037,4 +1053,47 @@ class BarButtonState extends State<BarButton> {
       ),
     );
   }
+}
+
+/// 设置项右边的“i”按钮：点开用对话框显示这一项的详细说明。
+class InfoButton extends StatelessWidget {
+  const InfoButton({super.key, required this.title, required this.text});
+  final String title, text;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: '$title 说明',
+    excludeSemantics: true,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showCupertinoDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialog) => CupertinoAlertDialog(
+          title: Text(title),
+          content: Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text(text, textAlign: TextAlign.start),
+          ),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('好'),
+            ),
+          ],
+        ),
+      ),
+      child: SizedBox(
+        width: 36,
+        height: 28,
+        child: Center(
+          child: Icon(
+            CupertinoIcons.info_circle,
+            size: 16,
+            color: DymuseTokens.secondary(context),
+          ),
+        ),
+      ),
+    ),
+  );
 }

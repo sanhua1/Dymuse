@@ -135,6 +135,7 @@ class BiliSourceFetcher {
           songs,
         );
       case BiliSourceType.collection:
+        final owner = await _ownerName(p['mid'] ?? '');
         return _paged(
           onProgress,
           pageSize: 100,
@@ -153,13 +154,14 @@ class BiliSourceFetcher {
           total: (d) => _int((d['page'] as Map?)?['total']),
           name: (d) => '${(d['meta'] as Map?)?['name'] ?? '合集 ${p['sid']}'}',
           cover: (d) => _https((d['meta'] as Map?)?['cover']),
-          song: (item, d) => _archive(item as Map, p['mid'] ?? ''),
+          song: (item, d) => _archive(item as Map, p['mid'] ?? '', owner),
         );
       case BiliSourceType.series:
         final meta = await client.get('/x/series/series', {
           'series_id': p['sid']!,
         });
         final info = (meta['data'] as Map?)?['meta'] as Map? ?? const {};
+        final owner = await _ownerName(p['mid'] ?? '');
         final content = await _paged(
           onProgress,
           pageSize: 100,
@@ -175,7 +177,7 @@ class BiliSourceFetcher {
           total: (d) => _int((d['page'] as Map?)?['total']),
           name: (d) => '${info['name'] ?? '系列 ${p['sid']}'}',
           cover: (d) => '',
-          song: (item, d) => _archive(item as Map, p['mid'] ?? ''),
+          song: (item, d) => _archive(item as Map, p['mid'] ?? '', owner),
         );
         return content;
       case BiliSourceType.favorite:
@@ -235,7 +237,8 @@ class BiliSourceFetcher {
               bvid: '${m['bvid']}',
               cid: 0,
               title: '${m['title']}',
-              artist: '${m['author'] ?? owner['name'] ?? ''}',
+              // author 可能是空串（不是 null），空串也要退回名片里的昵称。
+              artist: _firstText([m['author'], owner['name']]),
               artistId: '${m['mid'] ?? p['mid']}',
               cover: _https(m['pic']),
               duration: _int(m['length']),
@@ -246,16 +249,34 @@ class BiliSourceFetcher {
     }
   }
 
-  BiliSong _archive(Map m, String mid) => BiliSong(
+  /// 合集、系列的接口里每个视频都没有作者，作者就是这个合集/系列所属的 UP 主。
+  BiliSong _archive(Map m, String mid, String owner) => BiliSong(
     bvid: '${m['bvid']}',
     cid: 0,
     title: '${m['title']}',
-    artist: '',
+    artist: owner,
     artistId: mid,
     cover: _https(m['pic']),
     duration: _int(m['duration']),
     album: '${m['title']}',
   );
+
+  /// 合集、系列所属 UP 主的昵称；查不到不影响订阅，留空，展示时再按 mid 补。
+  Future<String> _ownerName(String mid) async {
+    try {
+      return await client.uploaderName(mid);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static String _firstText(List<Object?> values) {
+    for (final value in values) {
+      final text = '${value ?? ''}'.trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
 
   BiliSong _media(Map m) {
     final upper = m['upper'] as Map? ?? const {};

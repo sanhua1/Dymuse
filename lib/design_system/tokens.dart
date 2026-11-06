@@ -33,6 +33,63 @@ abstract final class DymuseTokens {
   /// Apple 与 Android 交给系统字体（SF/苹方、Roboto），Windows 指定 Segoe UI。
   static String? get fontFamily => apple || android ? null : 'Segoe UI';
 
+  /// 磨砂一端的底色（随明暗）。
+  static Color frostTint(Brightness brightness) => brightness == Brightness.dark
+      ? const Color(0xB81C1C20)
+      : const Color(0xBFF4F4F8);
+
+  /// 把一份玻璃参数向磨砂方向推 [t]（0 不变，1 完全磨砂）；t 为 0 时原样返回。
+  static glass.LiquidGlassSettings? frostLerp(
+    glass.LiquidGlassSettings? base,
+    double t,
+    Brightness brightness,
+  ) {
+    if (base == null || t <= 0) return base;
+    double mix(double a, double b) => a + (b - a) * t;
+    return glass.LiquidGlassSettings(
+      thickness: mix(base.thickness, 6),
+      blur: mix(base.blur, 26),
+      chromaticAberration: mix(base.chromaticAberration, 0),
+      lightIntensity: mix(base.lightIntensity, .3),
+      refractiveIndex: mix(base.refractiveIndex, 1.1),
+      saturation: mix(base.saturation, 1),
+      ambientStrength: mix(base.ambientStrength, .8),
+      lightAngle: base.lightAngle,
+      glassColor: Color.lerp(base.glassColor, frostTint(brightness), t)!,
+    );
+  }
+
+  /// 全局玻璃主题：t 为 0 时就是原来的样子；越大越接近磨砂。
+  static glass.GlassThemeData glassTheme(
+    Brightness brightness,
+    double t, {
+    bool noBlur = false,
+  }) {
+    double mix(double a, double b) => a + (b - a) * t;
+    final theme = glass.GlassThemeData.simple(
+      quality: glassQuality,
+      brightness: brightness,
+      blur: noBlur ? 0 : mix(12, 26),
+      thickness: mix(18, 6),
+      chromaticAberration: t > 0 ? mix(.01, 0) : null,
+      lightIntensity: t > 0 ? mix(.5, .3) : null,
+      refractiveIndex: t > 0 ? mix(1.2, 1.1) : null,
+    );
+    if (t <= 0 || noBlur) return theme;
+    glass.GlassThemeVariant tint(glass.GlassThemeVariant v, Brightness b) =>
+        v.copyWith(
+          settings: v.settings?.copyWith(
+            glassColor: Color.lerp(const Color(0x00FFFFFF), frostTint(b), t),
+          ),
+        );
+    return glass.GlassThemeData(
+      light: tint(theme.light, Brightness.light),
+      dark: tint(theme.dark, Brightness.dark),
+      interaction: theme.interaction,
+      brightness: brightness,
+    );
+  }
+
   /// 默认主题色（玫红）；用户可在设置里换成 [AccentColor] 中的其他颜色。
   static const accent = Color(0xFFB83258);
   static const accentDark = Color(0xFFFF91AE);
@@ -123,6 +180,26 @@ class Appearance extends ChangeNotifier {
   Brightness? brightness;
   bool reduceTransparency, reduceMotion;
   AccentColor accent;
+
+  /// 玻璃质感：0 是最强的液态玻璃（折射、高光），1 是磨砂（强模糊、较实的底色）；
+  /// 每台设备自己的设置。
+  double glassFrost = 0;
+
+  void setGlassFrost(double value) {
+    final clamped = value.clamp(0.0, 1.0);
+    if (glassFrost == clamped) return;
+    glassFrost = clamped;
+    notifyListeners();
+  }
+
+  /// 播放页背景的色块是否在播放时缓慢漂移（每台设备自己的设置）。
+  bool backdropDrift = true;
+
+  void setBackdropDrift(bool value) {
+    if (backdropDrift == value) return;
+    backdropDrift = value;
+    notifyListeners();
+  }
 
   /// 手机迷你播放器里是否显示进度条（每台设备自己的设置）。
   bool miniProgress = true;

@@ -135,6 +135,15 @@ class BiliHlsProxy {
     0,
   ).then(BiliHlsProxy._);
 
+  /// 丢弃当前实例（回环 socket 可能已被 iOS 在挂起期间回收），下次 [instance] 重新监听。
+  static Future<void> reset() async {
+    final old = _instance;
+    _instance = null;
+    try {
+      await (await old)?._server.close(force: true);
+    } catch (_) {}
+  }
+
   /// 注册一条上游直链；只保留最近的若干条，避免无限增长。
   Uri register(String url, Map<String, String> headers) {
     final token = '${++_counter}';

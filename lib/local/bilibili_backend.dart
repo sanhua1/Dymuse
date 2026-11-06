@@ -266,7 +266,7 @@ class BilibiliBackend {
       'id': id,
       'title': _name(song, search: search || _fromSearch.contains(id)),
       'rawTitle': song['title'],
-      'artists': [if ('${song['artist'] ?? ''}'.isNotEmpty) song['artist']],
+      'artists': [if (_artistOf(song).isNotEmpty) _artistOf(song)],
       'artistId': song['artistId'],
       'album': song['album'] ?? '',
       'coverUrl': song['cover'],
@@ -276,8 +276,85 @@ class BilibiliBackend {
     };
   }
 
+  static const _namesKey = 'bili.names';
+
+  /// UP 主 mid → 昵称。合集、系列的接口不返回作者，旧订阅（以及从中加进红心、歌单的歌）
+  /// 存的作者是空的，展示时按 mid 补上；只存在本机，不参与同步。
+  late final Map<String, String> _names = _loadNames();
+  final Set<String> _nameMisses = {};
+  Future<void> _nameQueue = Future.value();
+
+  /// 被 B 站限流后，这段时间内不再查昵称（过后自动恢复）。
+  DateTime _namesBlockedUntil = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Map<String, String> _loadNames() {
+    try {
+      final raw = prefs.getString(_namesKey);
+      if (raw == null) return {};
+      return {
+        for (final e in (jsonDecode(raw) as Map).entries)
+          '${e.key}': '${e.value}',
+      };
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// 歌曲的作者：自己带的优先，没有就用 mid 对应的昵称。
+  String _artistOf(BiliJson song) {
+    final own = '${song['artist'] ?? ''}'.trim();
+    return own.isNotEmpty ? own : _names['${song['artistId'] ?? ''}'] ?? '';
+  }
+
+  /// 给作者为空的歌曲查出 UP 主昵称：每个 mid 只查一次、结果存本机；一次最多查 4 个新的，
+  /// 查不到（网络、账号已注销）就留空，本次运行不再重试；被限流则立刻停手，5 分钟后再试。
+  Future<void> _fillNames(Iterable<BiliJson> songs) {
+    final list = songs.toList();
+    return _nameQueue = _nameQueue.then((_) async {
+      if (DateTime.now().isBefore(_namesBlockedUntil)) return;
+      final todo = <String>{};
+      for (final song in list) {
+        if ('${song['artist'] ?? ''}'.trim().isNotEmpty) continue;
+        final mid = '${song['artistId'] ?? ''}';
+        if (mid.isEmpty || mid == '0') continue;
+        if (_names.containsKey(mid) || _nameMisses.contains(mid)) continue;
+        todo.add(mid);
+      }
+      var changed = false;
+      for (final mid in todo.take(4)) {
+        try {
+          final name = await client.uploaderName(mid);
+          if (name.isEmpty) {
+            _nameMisses.add(mid);
+          } else {
+            _names[mid] = name;
+            changed = true;
+          }
+        } on BilibiliError catch (error) {
+          if (error.status == 429) {
+            _namesBlockedUntil = DateTime.now().add(const Duration(minutes: 5));
+            break;
+          }
+          _nameMisses.add(mid);
+        } catch (_) {
+          _nameMisses.add(mid);
+        }
+      }
+      if (changed) {
+        while (_names.length > 1000) {
+          _names.remove(_names.keys.first);
+        }
+        await prefs.setString(_namesKey, jsonEncode(_names));
+      }
+    });
+  }
+
   /// 展示过的歌曲都记住：之后取消红心、加入歌单时还能按 id 找回。
-  List<BiliJson> _views(List<BiliJson> songs, {bool search = false}) {
+  Future<List<BiliJson>> _views(
+    List<BiliJson> songs, {
+    bool search = false,
+  }) async {
+    await _fillNames(songs);
     _remember(songs);
     for (final song in songs) {
       search ? _fromSearch.add(_idOf(song)) : _fromSearch.remove(_idOf(song));
@@ -381,7 +458,11 @@ class BilibiliBackend {
       case 'tracks':
         if (s.length == 1) return _search(input);
         final id = Uri.decodeComponent(s[1]);
-        if (s.length == 2) return _view(await _detail(id));
+        if (s.length == 2) {
+          final song = await _detail(id);
+          await _fillNames([song]);
+          return _view(song);
+        }
         if (s[2] == 'favorite')
           return _setFavorite(id, input['favorite'] == true);
         if (s[2] == 'audio') return _audio(id);
@@ -394,7 +475,7 @@ class BilibiliBackend {
         break;
       case 'favorites':
         final all = _hearts;
-        return _slice(_views(all), input);
+        return _slice(await _views(all), input);
       case 'playlists':
         return _playlistsRoute(method, s, input);
       case 'subscriptions':
@@ -422,7 +503,7 @@ class BilibiliBackend {
       for (final song
           in (sub['tracks'] as List? ?? const []).cast<BiliJson>()) {
         final text =
-            '${song['title']} ${song['artist'] ?? ''} ${song['album'] ?? ''}'
+            '${song['title']} ${_artistOf(song)} ${song['album'] ?? ''}'
                 .toLowerCase();
         if (terms.every(text.contains) && seen.add(_idOf(song)))
           found.add(song);
@@ -435,7 +516,7 @@ class BilibiliBackend {
     final q = '${input['q'] ?? ''}'.trim();
     if (q.isEmpty) return {'items': <BiliJson>[], 'total': 0};
     if (input['scope'] == 'subscriptions') {
-      return _slice(_views(_searchSubscriptions(q)), input);
+      return _slice(await _views(_searchSubscriptions(q)), input);
     }
     final offset = int.tryParse('${input['offset']}') ?? 0;
     final page = offset ~/ 20 + 1;
@@ -443,7 +524,7 @@ class BilibiliBackend {
     final songs = [for (final song in result.songs) song.toJson()];
     _remember(songs);
     return {
-      'items': _views(songs, search: true),
+      'items': await _views(songs, search: true),
       'total': result.total,
       'pageSize': result.pageSize,
     };
@@ -547,7 +628,7 @@ class BilibiliBackend {
         await _writePlaylists(lists);
         return {'id': id, 'revision': _revisionOf(id)};
       }
-      final page = _slice(_views(tracks), input, max: 500);
+      final page = _slice(await _views(tracks), input, max: 500);
       return {
         ...page,
         'name': list['name'],
@@ -602,7 +683,10 @@ class BilibiliBackend {
     final key = jsonEncode(source.toJson());
     final owned = _subs.where((sub) => jsonEncode(sub['source']) == key);
     return {
-      ..._slice(_views([for (final s in content.songs) s.toJson()]), input),
+      ..._slice(
+        await _views([for (final s in content.songs) s.toJson()]),
+        input,
+      ),
       'name': content.name,
       'cover': content.cover,
       'typeLabel': source.type.label,
@@ -676,7 +760,7 @@ class BilibiliBackend {
       final tracks = (sub['tracks'] as List).cast<BiliJson>();
       _remember(tracks);
       return {
-        ..._slice(_views(tracks), input, max: 500),
+        ..._slice(await _views(tracks), input, max: 500),
         'name': sub['name'],
         'updatedAt': sub['updatedAt'],
       };

@@ -249,8 +249,6 @@ class _BilibiliAccountPanelState extends State<BilibiliAccountPanel> {
             ),
           ),
         ],
-        const SizedBox(height: 12),
-        Text('登录后可使用你账号里的收藏夹，并可能取得更高音质的音频。不登录也能搜索、订阅与播放。', style: caption),
       ],
     );
   }

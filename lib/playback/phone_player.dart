@@ -1,8 +1,10 @@
 import 'package:flutter/cupertino.dart';
 import '../design_system/components.dart';
 import '../design_system/tokens.dart';
+import '../features/bilibili_jump.dart';
 import '../features/catalog.dart';
 import 'playback_controller.dart';
+import 'player_backdrop.dart';
 import 'player_view.dart';
 
 enum _PhoneView { artwork, lyrics, queue }
@@ -37,23 +39,10 @@ class _PhonePlayerState extends State<PhonePlayer> {
       final controller = widget.controller, track = controller.track;
       final podcast = track?.isPodcast == true;
       if (podcast && view == _PhoneView.lyrics) view = _PhoneView.artwork;
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: DymuseTokens.background(context),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              DymuseTokens.surface(context),
-              DymuseTokens.background(context),
-              Color.lerp(
-                DymuseTokens.background(context),
-                DymuseTokens.tint(context),
-                .09,
-              )!,
-            ],
-          ),
-        ),
+      return PlayerBackdrop(
+        api: controller.api,
+        url: track?.cover,
+        playing: controller.engine.playing,
         child: SafeArea(
           top: false,
           child: LayoutBuilder(
@@ -215,6 +204,7 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final track = controller.track;
+    final jump = BilibiliJump.forPlayer(context, controller, onOpenCollection);
     return Padding(
       padding: const EdgeInsets.fromLTRB(28, 4, 28, 8),
       child: Row(
@@ -231,10 +221,9 @@ class _Header extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  track?.title ?? '尚未播放',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                TrackTitle(
+                  text: track?.title ?? '尚未播放',
+                  onJump: jump,
                   style: const TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w600,
@@ -245,6 +234,7 @@ class _Header extends StatelessWidget {
                     track: track,
                     onOpen: onOpenCollection,
                     fontSize: 14,
+                    onJump: jump,
                   ),
               ],
             ),

@@ -333,6 +333,14 @@ class BilibiliClient {
     ];
   }
 
+  /// UP 主昵称（公开的名片接口）。合集、系列的接口不返回作者，要靠 mid 查；查不到返回空串。
+  Future<String> uploaderName(String mid) async {
+    if (mid.isEmpty || mid == '0') return '';
+    final json = await get('/x/web-interface/card', {'mid': mid});
+    final card = (json['data'] as Map?)?['card'] as Map?;
+    return '${card?['name'] ?? ''}'.trim();
+  }
+
   /// 视频详情：每个分 P 一首歌。
   Future<List<BiliSong>> videoSongs(String bvid) async {
     final json = await wbiGet('/x/web-interface/wbi/view/detail', {

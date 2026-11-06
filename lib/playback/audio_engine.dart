@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import '../bilibili/hls_proxy.dart';
 import '../core/media_cache.dart';
 import 'caching_audio_source.dart';
+import '../core/diag.dart';
 
 /// 平台唯一引擎；队列和模式由上层持有。
 abstract class AudioEngine {
@@ -106,11 +107,14 @@ class PositionNotifier extends ValueNotifier<Duration> {
 
 /// iOS、macOS 与 Android 使用 just_audio（AVQueuePlayer / ExoPlayer）；请求头与 Windows 一致，由插件本机代理转发。
 class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
-  final ja.AudioPlayer _player = ja.AudioPlayer();
+  ja.AudioPlayer _player = ja.AudioPlayer();
+  double _volume = 1;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   StreamSubscription<Duration>? _positionSubscription;
   final _completed = StreamController<void>.broadcast();
   final _errors = StreamController<String>.broadcast();
+  DateTime _lastCommand = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _bufferingSince = DateTime.now();
   @override
   final PositionNotifier position = PositionNotifier();
   @override
@@ -126,18 +130,47 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   JustAudioEngine() {
     WidgetsBinding.instance.addObserver(this);
     _listenPosition();
+    _attach();
+  }
+
+  /// 订阅当前播放器的各个状态流。
+  void _attach() {
     _subscriptions.addAll([
       _player.durationStream.listen(
         (value) => duration.value = value ?? Duration.zero,
       ),
-      _player.playingStream.listen((value) => playing.value = value),
+      _player.playingStream.listen((value) {
+        playing.value = value;
+        // 不是应用自己发出的暂停（来电、蓝牙断开、其他应用抢占音频…）会标出来。
+        final mine =
+            DateTime.now().difference(_lastCommand) <
+            const Duration(seconds: 2);
+        Diag.log(
+          'audio playing=$value ${mine ? 'by-app' : 'EXTERNAL'} '
+          'state=${_player.processingState.name} pos=${_player.position.inSeconds}s',
+        );
+      }),
       _player.processingStateStream.listen((state) {
+        final wasBuffering = buffering.value;
         buffering.value =
             state == ja.ProcessingState.loading ||
             state == ja.ProcessingState.buffering;
+        if (buffering.value && !wasBuffering) {
+          _bufferingSince = DateTime.now();
+        } else if (!buffering.value && wasBuffering) {
+          final ms = DateTime.now().difference(_bufferingSince).inMilliseconds;
+          Diag.log('audio buffering ended after ${ms}ms -> ${state.name}');
+        }
+        Diag.log(
+          'audio state=${state.name} playing=${_player.playing} '
+          'pos=${_player.position.inSeconds}s',
+        );
         if (state == ja.ProcessingState.completed) _completed.add(null);
       }),
-      _player.errorStream.listen((error) => _errors.add('${error.message}')),
+      _player.errorStream.listen((error) {
+        Diag.log('audio error code=${error.code} ${error.message}');
+        _errors.add('${error.message}');
+      }),
     ]);
   }
 
@@ -147,11 +180,60 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
     );
   }
 
+  /// 换一个全新的播放器。just_audio 的本机回环代理服务器属于播放器实例；iOS 在应用挂起
+  /// 期间可能悄悄回收它的监听 socket，之后所有经代理的歌曲（边下边播、已缓存的歌）都会立刻报
+  /// “无法连接服务器”（-1004），直到重启应用。重建播放器会重新起一个代理。
+  Future<void> _recreatePlayer() async {
+    for (final subscription in _subscriptions) {
+      await subscription.cancel();
+    }
+    _subscriptions.clear();
+    final live = _positionSubscription != null;
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
+    final old = _player;
+    _player = ja.AudioPlayer();
+    _attach();
+    if (live || position.live == null) _listenPosition();
+    unawaited(_player.setVolume(_volume));
+    unawaited(old.dispose().catchError((_) {}));
+  }
+
+  /// 装载音源；经本机代理的音源遇到 -1004（代理不可达）时重建播放器并重试一次。
+  /// 返回是否装载成功（被新装载打断或失败都返回 false，失败已经上报）。
+  Future<bool> _setSource(
+    Future<ja.AudioSource> Function() build,
+    Duration offset, {
+    bool proxied = true,
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await _player.setAudioSource(await build(), initialPosition: offset);
+        return true;
+      } on ja.PlayerInterruptedException {
+        return false;
+      } on ja.PlayerException catch (error) {
+        if (attempt == 0 && proxied && error.code == -1004) {
+          Diag.log('audio proxy unreachable (-1004), recreating player');
+          await BiliHlsProxy.reset();
+          await _recreatePlayer();
+          continue;
+        }
+        _errors.add('${error.message}');
+        return false;
+      }
+    }
+  }
+
   /// 锁屏或切到后台后停止订阅位置流（just_audio 播放时每 200 ms 推一次，
   /// 会让 Dart 在后台持续被唤醒）；回到前台先对齐一次再恢复订阅。
   /// 播放本身在 AVPlayer 里继续，切歌、完成、错误走其他流，不受影响。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    Diag.log(
+      'app lifecycle=${state.name} playing=${_player.playing} '
+      'pos=${_player.position.inSeconds}s',
+    );
     final background =
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
@@ -181,65 +263,80 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   }) async {
     // B 站音频是 DASH 分片 MP4，AVPlayer 打不开；经本机代理包成 HLS 再播，不做歌曲缓存。
     if (Uri.tryParse(url)?.path.endsWith('.m4s') == true) {
-      try {
-        final proxy = await BiliHlsProxy.instance;
-        await _player.setAudioSource(
-          ja.AudioSource.uri(proxy.register(url, headers)),
-          initialPosition: offset,
-        );
-      } on ja.PlayerInterruptedException {
-        return;
-      } on ja.PlayerException catch (error) {
-        _errors.add('${error.message}');
-        return;
-      }
+      final ok = await _setSource(
+        () async => ja.AudioSource.uri(
+          (await BiliHlsProxy.instance).register(url, headers),
+        ),
+        offset,
+      );
+      if (!ok) return;
       if (play) unawaited(_player.play());
       return;
     }
+    _lastCommand = DateTime.now();
+    Diag.log(
+      'audio open offset=${offset.inSeconds}s play=$play '
+      'cacheKey=${cacheKey ?? '-'} host=${Uri.tryParse(url)?.host}',
+    );
     final cache = MediaCache.instance;
     final file = cache != null && cacheKey != null
         ? cache.file(CacheKind.audio, cacheKey)
         : null;
     CachingAudioSource.cancelOthers(file);
-    try {
-      await _player.setAudioSource(
-        file != null
-            ? CachingAudioSource(
-                Uri.parse(url),
-                headers: headers.isEmpty ? null : headers,
-                file: file,
-              )
-            : ja.AudioSource.uri(
-                Uri.parse(url),
-                headers: headers.isEmpty ? null : headers,
-              ),
-        initialPosition: offset,
-      );
-      if (cacheKey != null) cache?.audioStarted();
-    } on ja.PlayerInterruptedException {
-      return;
-    } on ja.PlayerException catch (error) {
-      _errors.add('${error.message}');
-      return;
-    }
+    final ok = await _setSource(
+      () async => file != null
+          ? CachingAudioSource(
+              Uri.parse(url),
+              headers: headers.isEmpty ? null : headers,
+              file: file,
+            )
+          : ja.AudioSource.uri(
+              Uri.parse(url),
+              headers: headers.isEmpty ? null : headers,
+            ),
+      offset,
+      proxied: file != null,
+    );
+    if (!ok) return;
+    if (cacheKey != null) cache?.audioStarted();
     // play() 在暂停或结束后才返回，不能等待。
-    if (play) unawaited(_player.play());
+    if (play) {
+      _lastCommand = DateTime.now();
+      unawaited(_player.play());
+    }
   }
 
   @override
   Future<void> toggle() async {
+    _lastCommand = DateTime.now();
     if (_player.playing) return _player.pause();
     unawaited(_player.play());
   }
 
   @override
-  Future<void> pause() => _player.pause();
+  Future<void> pause() {
+    _lastCommand = DateTime.now();
+    return _player.pause();
+  }
+
   @override
-  Future<void> stop() => _player.stop();
+  Future<void> stop() {
+    _lastCommand = DateTime.now();
+    return _player.stop();
+  }
+
   @override
-  Future<void> seek(Duration value) => _player.seek(value);
+  Future<void> seek(Duration value) {
+    Diag.log('audio seek to=${value.inSeconds}s');
+    return _player.seek(value);
+  }
+
   @override
-  Future<void> volume(double value) => _player.setVolume(value);
+  Future<void> volume(double value) {
+    _volume = value;
+    return _player.setVolume(value);
+  }
+
   @override
   Future<void> dispose() async {
     WidgetsBinding.instance.removeObserver(this);

@@ -3,9 +3,11 @@ import 'package:flutter/cupertino.dart';
 import '../core/api_client.dart';
 import '../design_system/components.dart';
 import '../design_system/tokens.dart';
+import '../features/bilibili_jump.dart';
 import '../features/catalog.dart';
 import '../features/song_actions.dart';
 import 'lyric_layers.dart';
+import 'player_backdrop.dart';
 import 'playback_controller.dart';
 
 class MiniPlayer extends StatelessWidget {
@@ -437,23 +439,10 @@ class _FullPlayerState extends State<FullPlayer> {
     listenable: widget.controller,
     builder: (_, _) {
       final controller = widget.controller, track = controller.track;
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: DymuseTokens.background(context),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              DymuseTokens.surface(context),
-              DymuseTokens.background(context),
-              Color.lerp(
-                DymuseTokens.background(context),
-                DymuseTokens.tint(context),
-                .09,
-              )!,
-            ],
-          ),
-        ),
+      return PlayerBackdrop(
+        api: controller.api,
+        url: track?.cover,
+        playing: controller.engine.playing,
         child: Column(
           children: [
             SizedBox(height: widget.topInset),
@@ -864,10 +853,14 @@ class TrackCredits extends StatelessWidget {
     this.center = false,
     this.fontSize = 14,
     this.showAlbum = false,
+    this.onJump,
   });
   final Track track;
   final ValueChanged<Collection>? onOpen;
   final bool center, showAlbum;
+
+  /// B 站歌曲没有艺人页：点 UP 主名等同于“跳转到…”（传入时 UP 主名可点击）。
+  final VoidCallback? onJump;
   final double fontSize;
   @override
   Widget build(BuildContext context) {
@@ -889,7 +882,18 @@ class TrackCredits extends StatelessWidget {
 
     void separator(String text) => parts.add(Text(text, style: style));
     if (track.artists.isEmpty) {
-      separator(track.artist);
+      if (onJump != null && track.artist.isNotEmpty) {
+        parts.add(
+          _CreditLink(
+            text: track.artist,
+            style: style,
+            label: '跳转到 ${track.artist} 所在的来源',
+            onTap: onJump!,
+          ),
+        );
+      } else {
+        separator(track.artist);
+      }
     } else {
       for (var i = 0; i < track.artists.length; i++) {
         if (i > 0) separator(' / ');
@@ -913,16 +917,41 @@ class TrackCredits extends StatelessWidget {
   }
 }
 
+/// 播放页的歌名。B 站歌曲没有专辑页，传入 [onJump] 后点歌名等同于“跳转到…”。
+class TrackTitle extends StatelessWidget {
+  const TrackTitle({
+    super.key,
+    required this.text,
+    required this.style,
+    this.onJump,
+  });
+  final String text;
+  final TextStyle style;
+  final VoidCallback? onJump;
+  @override
+  Widget build(BuildContext context) => onJump == null
+      ? Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style)
+      : _CreditLink(
+          text: text,
+          style: style,
+          label: '跳转到 $text 所在的来源',
+          maxLines: 1,
+          onTap: onJump!,
+        );
+}
+
 class _CreditLink extends StatefulWidget {
   const _CreditLink({
     required this.text,
     required this.style,
     required this.label,
     required this.onTap,
+    this.maxLines,
   });
   final String text, label;
   final TextStyle style;
   final VoidCallback onTap;
+  final int? maxLines;
   @override
   State<_CreditLink> createState() => _CreditLinkState();
 }
@@ -942,6 +971,8 @@ class _CreditLinkState extends State<_CreditLink> {
         onTap: widget.onTap,
         child: Text(
           widget.text,
+          maxLines: widget.maxLines,
+          overflow: widget.maxLines == null ? null : TextOverflow.ellipsis,
           style: widget.style.copyWith(
             color: hover ? DymuseTokens.ink(context) : null,
             decoration: hover ? TextDecoration.underline : null,
@@ -972,6 +1003,7 @@ class NowPlayingControls extends StatelessWidget {
     final track = controller.track;
     final empty = controller.items.isEmpty;
     final noQueue = controller.snapshot == null;
+    final jump = BilibiliJump.forPlayer(context, controller, onOpenCollection);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -984,10 +1016,9 @@ class NowPlayingControls extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      track?.title ?? '尚未播放',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    TrackTitle(
+                      text: track?.title ?? '尚未播放',
+                      onJump: jump,
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
@@ -1007,6 +1038,7 @@ class NowPlayingControls extends StatelessWidget {
                         track: track,
                         onOpen: onOpenCollection,
                         fontSize: 16,
+                        onJump: jump,
                       ),
                   ],
                 ),
@@ -1127,6 +1159,12 @@ class _Scrubber extends StatefulWidget {
 
 class _ScrubberState extends State<_Scrubber> {
   double? dragging;
+
+  /// 右侧时间默认显示总时长；点按任一端时间切换为剩余时长。
+  bool remaining = false;
+
+  void toggleTimeMode() => setState(() => remaining = !remaining);
+
   @override
   Widget build(BuildContext context) {
     final engine = widget.controller.engine;
@@ -1181,21 +1219,38 @@ class _ScrubberState extends State<_Scrubber> {
                         if (mounted) setState(() => dragging = null);
                       },
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               Row(
                 children: [
-                  Text(timeLabel(shown), style: style),
+                  _TimeLabel(
+                    text: timeLabel(shown),
+                    label: '已播放 ${timeLabel(shown)}',
+                    hint: remaining ? '切换为总时长' : '切换为剩余时间',
+                    style: style,
+                    padding: const EdgeInsets.fromLTRB(0, 6, 8, 6),
+                    onTap: toggleTimeMode,
+                  ),
                   if (engine.buffering.value)
                     const Padding(
                       padding: EdgeInsets.only(left: 8),
                       child: CupertinoActivityIndicator(radius: 6),
                     ),
                   const Spacer(),
-                  Text(
-                    total > Duration.zero
-                        ? '-${timeLabel(total - shown)}'
+                  _TimeLabel(
+                    text: total > Duration.zero
+                        ? remaining
+                              ? '-${timeLabel(total - shown)}'
+                              : timeLabel(total)
                         : '--:--',
+                    label: total > Duration.zero
+                        ? remaining
+                              ? '剩余 ${timeLabel(total - shown)}'
+                              : '总时长 ${timeLabel(total)}'
+                        : '总时长未知',
+                    hint: remaining ? '切换为总时长' : '切换为剩余时间',
                     style: style,
+                    padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
+                    onTap: toggleTimeMode,
                   ),
                 ],
               ),
@@ -1205,6 +1260,41 @@ class _ScrubberState extends State<_Scrubber> {
       },
     );
   }
+}
+
+/// 进度条两端的时间标签：点按切换“总时长 / 剩余时长”显示。
+class _TimeLabel extends StatelessWidget {
+  const _TimeLabel({
+    required this.text,
+    required this.label,
+    required this.hint,
+    required this.style,
+    required this.padding,
+    required this.onTap,
+  });
+  final String text, label, hint;
+  final TextStyle style;
+  final EdgeInsets padding;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    label: label,
+    hint: hint,
+    excludeSemantics: true,
+    onTap: onTap,
+    child: MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Padding(
+          padding: padding,
+          child: Text(text, style: style),
+        ),
+      ),
+    ),
+  );
 }
 
 /// 从左向右填充的细轨道；点击或拖动设置值。悬停时轨道略微加粗。

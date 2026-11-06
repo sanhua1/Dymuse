@@ -32,11 +32,6 @@ class SyncPanel extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '把登录凭证、取链服务配置、B 站红心/歌单/订阅和播放进度同步到你自己的 WebDAV 空间，在多台设备之间保持一致。',
-              style: caption,
-            ),
-            const SizedBox(height: 12),
             PanelButton(
               label: '设置 WebDAV 同步',
               onPressed: () => showSyncForm(context, sync),
@@ -106,12 +101,6 @@ class SyncPanel extends StatelessWidget {
                 },
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '登录凭证用同步密码加密后才会上传；红心、歌单、订阅与播放进度以明文 JSON 存放。'
-            '各设备的改动逐条合并，删除也会同步。',
-            style: caption,
           ),
         ],
       );

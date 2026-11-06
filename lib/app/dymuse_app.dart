@@ -119,6 +119,7 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
     );
     unawaited(prefs.setBool('reduceMotion', appearance.reduceMotion));
     unawaited(prefs.setString('accent', appearance.accentValue));
+    unawaited(prefs.setDouble('glassFrost', appearance.glassFrost));
     unawaited(widget.window.setAppearance(appearance.brightness));
   }
 
@@ -197,13 +198,12 @@ class _DymuseAppState extends State<DymuseApp> with WidgetsBindingObserver {
                     media.disableAnimations || appearance.reduceMotion,
               ),
               child: glass.LiquidGlassWidgets.wrap(
-                theme: glass.GlassThemeData.simple(
-                  quality: DymuseTokens.glassQuality,
-                  brightness: effective,
+                theme: DymuseTokens.glassTheme(
+                  effective,
+                  appearance.glassFrost,
                   // Android 上任何背后模糊都要每帧抓取并重绘背景，实测使
                   // 120Hz 下约一半的帧超时；关掉后玻璃只保留底色、描边与高光。
-                  blur: DymuseTokens.android ? 0 : 12,
-                  thickness: 18,
+                  noBlur: DymuseTokens.android,
                 ),
                 // Apple 平台由系统负责缩放和边框；macOS 背景留给原生侧栏材质。
                 child: DymuseTokens.mobile || DymuseTokens.macOS

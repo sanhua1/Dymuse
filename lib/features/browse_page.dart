@@ -8,6 +8,7 @@ import '../design_system/components.dart';
 import '../design_system/tokens.dart';
 import '../playback/playback_controller.dart';
 import '../platform/desktop_window.dart';
+import 'bilibili_jump.dart';
 import 'catalog.dart';
 import 'song_actions.dart';
 import 'search_controls.dart';
@@ -1724,54 +1725,12 @@ class _TrackRowState extends State<TrackRow> {
   }
 
   /// 查出这个视频所属的合集、多 P 视频、UP 主投稿，选一个进入（进入后可添加订阅）。
-  Future<void> _jumpToSource(BuildContext context) async {
-    List<Json> sources;
-    try {
-      final data =
-          await widget.api.get(
-                '/bilibili/tracks/${Uri.encodeComponent(widget.track.id)}/sources',
-              )
-              as Json;
-      sources = (data['items'] as List? ?? const []).cast<Json>();
-    } catch (error) {
-      if (context.mounted) {
-        await showCupertinoDialog<void>(
-          context: context,
-          builder: (dialog) => CupertinoAlertDialog(
-            title: const Text('无法查询'),
-            content: Text(readableError(error)),
-            actions: [
-              CupertinoDialogAction(
-                onPressed: () => Navigator.pop(dialog),
-                child: const Text('好'),
-              ),
-            ],
-          ),
-        );
-      }
-      return;
-    }
-    if (!context.mounted) return;
-    final picked = await showChoiceSheet<Json>(
-      context,
-      title: '跳转到',
-      message: sources.isEmpty ? '这个视频没有可以跳转的来源。' : null,
-      choices: [
-        for (final item in sources)
-          ('${item['typeLabel']} · ${item['label']}', item),
-      ],
-    );
-    if (picked == null) return;
-    widget.onOpenCollection?.call(
-      Collection(
-        '${picked['input']}',
-        '${picked['label']}',
-        '${picked['typeLabel']}',
-        widget.track.cover,
-        'source',
-      ),
-    );
-  }
+  Future<void> _jumpToSource(BuildContext context) => BilibiliJump.open(
+    context,
+    api: widget.api,
+    track: widget.track,
+    onOpen: (target) => widget.onOpenCollection?.call(target),
+  );
 
   /// 完整的原视频标题：可选中，也可一键复制。
   static Future<void> _showRawTitle(BuildContext context, String title) =>

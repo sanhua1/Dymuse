@@ -574,16 +574,10 @@ Future<void> showNeteaseLogin(NavigatorState navigator, Session session) async {
   _presenting = true;
   try {
     if (DymuseTokens.mobile) {
-      sheetCovering.value = true;
-      try {
-        await navigator.push<void>(
-          DymuseSheetRoute<void>(
-            builder: (context) => _LoginSheet(session: session),
-          ),
-        );
-      } finally {
-        sheetCovering.value = false;
-      }
+      await pushDymuseSheet<void>(
+        navigator,
+        (context) => _LoginSheet(session: session),
+      );
     } else {
       await navigator.push<void>(
         RawDialogRoute<void>(

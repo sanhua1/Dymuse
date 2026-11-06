@@ -99,6 +99,125 @@ void main() {
     expect(parseBiliSource('${items.last['input']}')!.type.name, 'uploads');
   });
 
+  test('合集里作者为空的歌：按 UP 主 mid 补上昵称，每个 mid 只查一次并存在本机', () async {
+    await prefs.setString(
+      'bili.subs.v2',
+      jsonEncode({
+        's1': {
+          'ts': 1,
+          'del': false,
+          'name': '合集·某',
+          'type': 'collection',
+          'tracks': [
+            {...song('BV1aa411c7mA', '甲'), 'artist': '', 'artistId': '5'},
+            {...song('BV1bb411c7mB', '乙'), 'artist': '', 'artistId': '5'},
+            // 自己带作者的不查。
+            {...song('BV1cc411c7mC', '丙'), 'artist': '别的UP', 'artistId': '9'},
+          ],
+        },
+      }),
+    );
+    final client = _NamesClient({'5': 'UP主甲'});
+    BilibiliBackend fresh() => BilibiliBackend(prefs, client);
+    var local = LocalBackend(prefs, NeteaseClient(), fresh());
+    Future<List<Map>> list() async {
+      final page =
+          await local.handle(
+                'GET',
+                '/bilibili/subscriptions/s1/tracks',
+                null,
+                null,
+              )
+              as Map;
+      return (page['items'] as List).cast<Map>();
+    }
+
+    var items = await list();
+    expect(items.map((e) => (e['artists'] as List).join()), [
+      'UP主甲',
+      'UP主甲',
+      '别的UP',
+    ]);
+    expect(client.lookups, ['5']);
+    // 再看一遍不再联网；重启（新的后端实例）后也不用再查，昵称已存在本机。
+    await list();
+    local = LocalBackend(prefs, NeteaseClient(), fresh());
+    items = await list();
+    expect(items.first['artists'], ['UP主甲']);
+    expect(client.lookups, ['5']);
+    // 播放页取详情时同样带上昵称。
+    final detail =
+        await local.handle(
+              'GET',
+              '/bilibili/tracks/${Uri.encodeComponent('BV1aa411c7mA:0')}',
+              null,
+              null,
+            )
+            as Map;
+    expect(detail['artists'], ['UP主甲']);
+  });
+
+  test('查不到 UP 主昵称时留空，不影响列表，本次运行不重复请求；被限流立刻停手', () async {
+    await prefs.setString(
+      'bili.subs.v2',
+      jsonEncode({
+        's1': {
+          'ts': 1,
+          'del': false,
+          'name': '合集',
+          'type': 'collection',
+          'tracks': [
+            {...song('BV1aa411c7mA', '甲'), 'artist': '', 'artistId': '6'},
+            {...song('BV1bb411c7mB', '乙'), 'artist': '', 'artistId': '7'},
+          ],
+        },
+      }),
+    );
+    final client = _NamesClient({}, limited: true);
+    final local = LocalBackend(
+      prefs,
+      NeteaseClient(),
+      BilibiliBackend(prefs, client),
+    );
+    for (var i = 0; i < 2; i++) {
+      final page =
+          await local.handle(
+                'GET',
+                '/bilibili/subscriptions/s1/tracks',
+                null,
+                null,
+              )
+              as Map;
+      final items = (page['items'] as List).cast<Map>();
+      expect(items.length, 2);
+      expect(items.first['artists'], isEmpty);
+    }
+    // 第一次就被限流：只发了一个请求，第二个 mid 没有再试，冷却期内第二次列表也不重试。
+    expect(client.lookups, ['6']);
+    expect(prefs.getString('bili.names'), isNull);
+  });
+
+  test('合集、系列的歌带上所属 UP 主的昵称；个人投稿的 author 为空串时退回名片昵称', () async {
+    final client = _ArchiveClient();
+    final fetcher = BiliSourceFetcher(client);
+    final collection = await fetcher.fetch(
+      const BiliSource(BiliSourceType.collection, {'mid': '5', 'sid': '1'}),
+    );
+    expect(collection.songs.map((e) => e.artist), ['UP主甲', 'UP主甲']);
+    expect(collection.songs.first.artistId, '5');
+    // 名片接口失败不影响订阅：作者留空，展示时再按 mid 补。
+    client.nameFails = true;
+    final noName = await fetcher.fetch(
+      const BiliSource(BiliSourceType.collection, {'mid': '5', 'sid': '1'}),
+    );
+    expect(noName.songs.map((e) => e.artist), ['', '']);
+    client.nameFails = false;
+    final uploads = await fetcher.fetch(
+      const BiliSource(BiliSourceType.uploads, {'mid': '5'}),
+    );
+    expect(uploads.songs.map((e) => e.artist), ['UP主甲', '合作作者']);
+  });
+
   test('重启后继续播放搜索来的歌：本地没有时联网补查，播放过的会留下', () async {
     const id = 'BV1zz411c7mZ:55';
     final client = _LookupClient();
@@ -304,6 +423,90 @@ class _SourcesClient extends BilibiliClient {
       'input': 'https://space.bilibili.com/5',
     },
   ];
+}
+
+/// 名片接口的替身：记录查过哪些 mid；[limited] 时一律返回被限流。
+class _NamesClient extends BilibiliClient {
+  _NamesClient(this.names, {this.limited = false});
+  final Map<String, String> names;
+  final bool limited;
+  final lookups = <String>[];
+  @override
+  Future<String> uploaderName(String mid) async {
+    lookups.add(mid);
+    if (limited) {
+      throw const BilibiliError('BILIBILI_RATE_LIMITED', '限流', 429);
+    }
+    return names[mid] ?? '';
+  }
+}
+
+/// 合集与个人投稿接口的替身：合集里的视频没有任何作者字段，个人投稿的 author 可能是空串。
+class _ArchiveClient extends BilibiliClient {
+  bool nameFails = false;
+  @override
+  Future<String> uploaderName(String mid) async {
+    if (nameFails) throw const BilibiliError('X', '失败');
+    return 'UP主甲';
+  }
+
+  @override
+  Future<Map<String, dynamic>> get(
+    String path,
+    Map<String, Object?> params, {
+    bool withLogin = false,
+  }) async {
+    if (path.contains('seasons_archives_list')) {
+      return {
+        'data': {
+          'archives': [
+            {'bvid': 'BV1aa411c7mA', 'title': '甲', 'duration': 10},
+            {'bvid': 'BV1bb411c7mB', 'title': '乙', 'duration': 20},
+          ],
+          'page': {'total': 2},
+          'meta': {'name': '某合集'},
+        },
+      };
+    }
+    if (path.contains('/card')) {
+      return {
+        'data': {
+          'card': {'name': 'UP主甲', 'face': ''},
+        },
+      };
+    }
+    throw StateError('未预期的请求 $path');
+  }
+
+  @override
+  Future<Map<String, dynamic>> wbiGet(
+    String path,
+    Map<String, Object?> params, {
+    bool withLogin = false,
+  }) async => {
+    'data': {
+      'list': {
+        'vlist': [
+          // author 是空串（不是 null）：要退回名片里的昵称。
+          {
+            'bvid': 'BV1aa411c7mA',
+            'title': '甲',
+            'author': '',
+            'mid': 5,
+            'length': '01:00',
+          },
+          {
+            'bvid': 'BV1bb411c7mB',
+            'title': '乙',
+            'author': '合作作者',
+            'mid': 5,
+            'length': '02:00',
+          },
+        ],
+      },
+      'page': {'count': 2},
+    },
+  };
 }
 
 class _LookupClient extends BilibiliClient {

@@ -101,22 +101,36 @@ class DymuseSheetRoute<T> extends CupertinoSheetRoute<T> {
   }
 }
 
-/// 页面 Sheet 正盖在主页上时为 true。主页顶部的渐进模糊带是着色器滤镜，
-/// 不服从外层的圆角裁剪，被盖住缩小后会在圆角外露出尖角；盖住期间先把它收起来。
+/// 页面 Sheet 正盖在主页上时为 true。
 final ValueNotifier<bool> sheetCovering = ValueNotifier(false);
+
+/// 页面 Sheet 的出现进度（0 收起、1 完全展开），跟随弹出、收起动画和下拉手势。
+/// 主页顶部的渐进模糊带是着色器滤镜，不服从外层的圆角裁剪，被盖住缩小后会在圆角外露出尖角；
+/// 所以随进度把它渐渐收起（前半程收完），收起 Sheet 时再渐渐出现，而不是瞬间消失或出现。
+final ValueNotifier<double> sheetProgress = ValueNotifier(0);
 
 /// 打开页面 Sheet（设置、播放页等）；返回时 Sheet 已完全收起。
 Future<T?> showDymuseSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
-}) async {
+}) => pushDymuseSheet<T>(Navigator.of(context, rootNavigator: true), builder);
+
+/// 在指定导航器上推入页面 Sheet，并让 [sheetProgress] 跟随它的动画。
+Future<T?> pushDymuseSheet<T>(
+  NavigatorState navigator,
+  WidgetBuilder builder,
+) async {
   sheetCovering.value = true;
+  final route = DymuseSheetRoute<T>(builder: builder);
+  final future = navigator.push<T>(route);
+  final animation = route.animation;
+  void follow() => sheetProgress.value = animation?.value ?? 0;
+  animation?.addListener(follow);
   try {
-    return await Navigator.of(
-      context,
-      rootNavigator: true,
-    ).push<T>(DymuseSheetRoute<T>(builder: builder));
+    return await future;
   } finally {
+    animation?.removeListener(follow);
+    sheetProgress.value = 0;
     sheetCovering.value = false;
   }
 }

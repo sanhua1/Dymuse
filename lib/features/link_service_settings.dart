@@ -57,15 +57,7 @@ class LinkServicePanel extends StatelessWidget {
       if (!service.configured) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '和家人朋友共用一个会员账号取歌曲链接：添加你自己部署的取链服务（网址、账号、密码），'
-              '播放时就会用服务里的会员账号取链接。不添加则用你自己登录的账号。部署方法见项目 README。',
-              style: caption,
-            ),
-            const SizedBox(height: 12),
-            form('添加取链服务'),
-          ],
+          children: [form('添加取链服务')],
         );
       }
       final host = Uri.tryParse(service.url)?.host ?? service.url;
@@ -127,14 +119,6 @@ class LinkServicePanel extends StatelessWidget {
               PanelButton(label: '移除', onPressed: () => _remove(context)),
             ],
           ),
-          if (service.enabled) ...[
-            const SizedBox(height: 12),
-            Text(
-              '播放时用这个账号取歌曲链接（会员歌曲、无损音质）；红心、歌单、推荐等仍是你自己登录的账号。'
-              '账号每 6 小时自动更新，也可以手动刷新。',
-              style: caption,
-            ),
-          ],
         ],
       );
     },

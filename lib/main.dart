@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'dart:ui' show FrameTiming;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
@@ -21,10 +22,25 @@ import 'playback/audio_quality.dart';
 import 'playback/playback_controller.dart';
 import 'sync/sync_service.dart';
 import 'update/update_service.dart';
+import 'core/diag.dart';
 
 /// 已注册 Windows、macOS、iOS 与 Android；手机使用独立移动导航，不创建桌面窗口。
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  Diag.log(
+    'app start ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+  );
+  final previousError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    Diag.log('flutter error: ${details.exceptionAsString()}');
+    previousError?.call(details);
+  };
+  ui.PlatformDispatcher.instance.onError = (error, stack) {
+    Diag.log(
+      'uncaught: $error\n${stack.toString().split('\n').take(6).join('\n')}',
+    );
+    return false;
+  };
   if (const bool.fromEnvironment('FRAME_LOG')) _logFrames();
   if (!Platform.isWindows &&
       !Platform.isMacOS &&
@@ -76,6 +92,11 @@ Future<void> main() async {
           reduceMotion:
               !justAudio && (preferences.getBool('reduceMotion') ?? false),
         )
+        ..glassFrost = (preferences.getDouble('glassFrost') ?? 0).clamp(
+          0.0,
+          1.0,
+        )
+        ..backdropDrift = preferences.getBool('backdropDrift') ?? true
         ..applyAccent(preferences.getString('accent'))
         ..miniProgress = preferences.getBool('miniProgress') ?? true
         ..miniProgressShown = preferences.getBool('miniProgress') ?? true;
