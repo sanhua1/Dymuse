@@ -7,6 +7,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart' as hash;
 
+import '../core/diag.dart';
 import 'crypto.dart' as enc;
 
 enum Crypto { eapi, weapi }
@@ -120,6 +121,57 @@ class NeteaseClient {
 
     /// 只对这一次请求改用另一份 Cookie（取链账号）；响应里的 Set-Cookie 不写回本机会话。
     Map<String, String>? cookieOverride,
+
+    /// 只读请求遇到 -460（网易云风控偶发拦截）时稍等后再试，最多再试 [_riskRetries] 次。
+    bool retryRisk = false,
+  }) async {
+    for (var attempt = 0; ; attempt++) {
+      final json = await _requestOnce(
+        uri,
+        data,
+        crypto: crypto,
+        checkToken: checkToken,
+        cookieOverride: cookieOverride,
+      );
+      final code = (json['code'] as num?)?.toInt();
+      // 与 request.js 的 SPECIAL_STATUS_CODES 一致：这些业务码不算失败。
+      const special = {200, 201, 302, 400, 502, 800, 801, 802, 803};
+      if (lenient || code == null || special.contains(code)) return json;
+      final retry = retryRisk && code == -460 && attempt < _riskRetries.length;
+      Diag.log(
+        'netease $uri code=$code crypto=${crypto.name} '
+        'vip=${cookieOverride != null} attempt=${attempt + 1}'
+        '${retry ? ' retrying' : ''}',
+      );
+      if (retry) {
+        await Future<void>.delayed(_riskRetries[attempt]);
+        continue;
+      }
+      throw NeteaseError(
+        code == 301 || code == 401
+            ? 'NETEASE_SESSION_EXPIRED'
+            : 'NETEASE_UPSTREAM_FAILED',
+        code == 301 || code == 401
+            ? '网易云登录已失效，请重新登录。'
+            : '网易云请求失败（$code），请稍后重试。',
+        code == 301 || code == 401 ? 401 : 502,
+      );
+    }
+  }
+
+  /// -460 后的等待时间；测试会改短。
+  static List<Duration> _riskRetries = const [
+    Duration(milliseconds: 600),
+    Duration(milliseconds: 1500),
+  ];
+  static set riskRetriesForTest(List<Duration> value) => _riskRetries = value;
+
+  Future<Map<String, dynamic>> _requestOnce(
+    String uri,
+    Map<String, Object?> data, {
+    required Crypto crypto,
+    required bool checkToken,
+    Map<String, String>? cookieOverride,
   }) async {
     final token = checkToken ? await antiCheat?.call() ?? '' : '';
     final c = _processed(crypto, cookieOverride ?? cookie);
@@ -168,20 +220,6 @@ class NeteaseClient {
     }
     if (json is! Map<String, dynamic>) {
       throw const NeteaseError('NETEASE_UPSTREAM_FAILED', '网易云返回了无法解析的数据。');
-    }
-    final code = (json['code'] as num?)?.toInt();
-    // 与 request.js 的 SPECIAL_STATUS_CODES 一致：这些业务码不算失败。
-    const special = {200, 201, 302, 400, 502, 800, 801, 802, 803};
-    if (!lenient && code != null && !special.contains(code)) {
-      throw NeteaseError(
-        code == 301 || code == 401
-            ? 'NETEASE_SESSION_EXPIRED'
-            : 'NETEASE_UPSTREAM_FAILED',
-        code == 301 || code == 401
-            ? '网易云登录已失效，请重新登录。'
-            : '网易云请求失败（$code），请稍后重试。',
-        code == 301 || code == 401 ? 401 : 502,
-      );
     }
     return json;
   }
@@ -372,6 +410,7 @@ class NeteaseClient {
     '/api/v3/song/detail',
     {'c': '[${ids.map((id) => '{"id":$id}').join(',')}]'},
     crypto: Crypto.weapi,
+    retryRisk: true,
   );
 
   Future<Map<String, dynamic>> album(String id) =>
@@ -569,7 +608,7 @@ class NeteaseClient {
 
   /// 这首歌各音质档位的详情；没有的档位为 null（l/m/h/sq/hr…）。
   Future<Map<String, dynamic>> musicDetail(String id) =>
-      request('/api/song/music/detail/get', {'songId': id});
+      request('/api/song/music/detail/get', {'songId': id}, retryRisk: true);
 
   /// 歌曲链接；[level] 为 standard/higher/exhigh/lossless/hires。
   /// 账号没有对应权限时网易云自行降级，返回里的 `level` 是实际档位。
@@ -581,6 +620,7 @@ class NeteaseClient {
     Future<Map<String, dynamic>> fetch(Map<String, String>? vip) => request(
       '/api/song/enhance/player/url/v1',
       {'ids': jsonEncode(list), 'level': level, 'encodeType': 'flac'},
+      retryRisk: true,
       cookieOverride: vip == null
           ? null
           : {...vip, 'deviceId': cookie['deviceId']!},

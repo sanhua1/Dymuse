@@ -85,6 +85,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   /// 已下载并校验好的安装包；Android 授权“安装未知应用”后重试时不必重新下载。
   File? _package;
 
+  /// macOS：“复制命令”已点过（按钮改为“已复制”）。
+  bool _copied = false;
+
   UpdateInfo get _info => widget.info;
 
   @override
@@ -160,8 +163,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         if (!mounted) return;
         setState(() {
           _phase = _Phase.manual;
-          _error =
-              '新版已下载并校验，安装窗口已打开。点“好”后 Dymuse 会自动退出，请把新版 Dymuse 拖到「应用程序」上并选择“替换”，再重新打开。';
+          _error = macInstallSteps;
         });
         return;
       }
@@ -278,6 +280,16 @@ class _UpdateDialogState extends State<_UpdateDialog> {
     final actions = switch (_phase) {
       _Phase.working => <Widget>[],
       _Phase.manual => [
+        // 应用退出后就没法再复制，所以在退出前提供；点了不关闭提示。
+        CupertinoDialogAction(
+          onPressed: () async {
+            await Clipboard.setData(
+              const ClipboardData(text: macQuarantineFix),
+            );
+            if (mounted) setState(() => _copied = true);
+          },
+          child: Text(_copied ? '已复制' : '复制命令'),
+        ),
         CupertinoDialogAction(
           isDefaultAction: true,
           onPressed: () => SystemNavigator.pop(), // 真正退出（会先保存播放进度），Finder 才能替换
