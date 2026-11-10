@@ -61,7 +61,12 @@ class NeteaseClient {
     'osver': 'Microsoft-Windows-10-Professional-build-19045-64bit',
     'channel': 'netease',
   };
-  static const _eapiUa = 'NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)';
+  // eapi 的 User-Agent 必须与上面 header 里的身份（Windows 电脑版 3.1.17）一致：
+  // 2026-11 起网易云会对“电脑版 header + iPhone UA”的取链请求大量回 -460。
+  static const _eapiUa =
+      'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Safari/537.36 Chrome/91.0.4472.164 '
+      'NeteaseMusicDesktop/3.1.17.204416';
   static const _weapiUa =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0';
