@@ -362,6 +362,57 @@ void main() {
     expect((restored['state'] as Map)['positionMs'], 5000);
   });
 
+  test('搜索结果滤掉课堂等没有 bvid 的条目', () {
+    final result = BilibiliClient.parseSearch({
+      'data': {
+        'numResults': 1000,
+        'numPages': 50,
+        'pagesize': 20,
+        'result': [
+          {'type': 'video', 'bvid': 'BV1eqADehELo', 'title': '<em>天上人间</em>'},
+          {'type': 'ketang', 'bvid': '', 'title': '天上人间'},
+          {'type': 'video', 'bvid': 'BV1iTiUYFEfu', 'title': '天上人间 - 古巨基'},
+        ],
+      },
+    });
+    expect(result.songs.map((s) => s.id), ['BV1eqADehELo:0', 'BV1iTiUYFEfu:0']);
+    expect(result.songs.first.title, '天上人间');
+    expect(result.pages, 50);
+  });
+
+  test('点搜索结果里的歌：队列是已加载的全部搜索结果，并按页码翻页', () async {
+    final client = _SearchClient();
+    final local = LocalBackend(
+      prefs,
+      NeteaseClient(),
+      BilibiliBackend(prefs, client),
+    );
+    final first =
+        await local.handle('GET', '/bilibili/tracks', {'q': '歌'}, null) as Map;
+    // 第 1 页滤掉一条无效结果后只有 19 条，下一页仍从第 2 页开始。
+    expect((first['items'] as List).length, 19);
+    expect(first['nextOffset'], 20);
+    final second =
+        await local.handle('GET', '/bilibili/tracks', {
+              'q': '歌',
+              'offset': 20,
+            }, null)
+            as Map;
+    expect(second['nextOffset'], isNull);
+    // 选第 2 页的歌：队列包含两页全部 39 首，并定位到所选歌曲。
+    final selected = '${(second['items'] as List)[3]['id']}';
+    final snapshot =
+        await local.handle('POST', '/playback/bilibili/start', null, {
+              'context': {'kind': 'tracks', 'q': '歌'},
+              'selectedId': selected,
+            })
+            as Map;
+    final state = snapshot['state'] as Map;
+    expect((state['items'] as List).length, 39);
+    expect(state['index'], 22);
+    expect(client.searches, 2);
+  });
+
   test('队列拒绝网易云歌曲 id', () async {
     expect(
       call('PUT', '/playback/bilibili', {
@@ -531,4 +582,32 @@ class _LookupClient extends BilibiliClient {
   @override
   Future<BiliAudio> audioUrl(String bvid, int cid) async =>
       const BiliAudio('https://x/a.m4s', {});
+}
+
+class _SearchClient extends BilibiliClient {
+  int searches = 0;
+
+  static String _bv(int page, int i) =>
+      'BV1$page${'$i'.padLeft(2, '0')}'.padRight(12, 'a');
+
+  @override
+  Future<({List<BiliSong> songs, int total, int pageSize, int pages})> search(
+    String keyword, {
+    int page = 1,
+  }) async {
+    searches++;
+    return BilibiliClient.parseSearch({
+      'data': {
+        'numResults': 40,
+        'numPages': 2,
+        'pagesize': 20,
+        'result': [
+          for (var i = 0; i < 20; i++)
+            page == 1 && i == 2
+                ? {'type': 'ketang', 'bvid': '', 'title': '课'}
+                : {'type': 'video', 'bvid': _bv(page, i), 'title': '歌$page-$i'},
+        ],
+      },
+    });
+  }
 }

@@ -259,7 +259,7 @@ class BilibiliClient {
 
   /// 搜索视频；每页 20 条，页码从 1 开始。返回的歌曲 cid 为 0（未解析），
   /// 取详情或播放时再用 [cidOf] 补上。
-  Future<({List<BiliSong> songs, int total, int pageSize})> search(
+  Future<({List<BiliSong> songs, int total, int pageSize, int pages})> search(
     String keyword, {
     int page = 1,
   }) async {
@@ -269,24 +269,39 @@ class BilibiliClient {
       'keyword': keyword,
       'page': page,
     }, withLogin: loggedIn);
+    return parseSearch(json);
+  }
+
+  /// 解析视频搜索结果。B 站会在视频结果里混入课堂（`type: ketang`）等
+  /// 没有 bvid 的条目，这些不能播放，也会让队列校验失败，必须滤掉。
+  static ({List<BiliSong> songs, int total, int pageSize, int pages})
+  parseSearch(Map<String, dynamic> json) {
     final data = json['data'] as Map? ?? const {};
-    final items = (data['result'] as List? ?? const []).cast<Map>();
+    final items = (data['result'] as List? ?? const []).whereType<Map>();
+    final bv = RegExp(r'^BV[0-9A-Za-z]{10}$');
+    final pageSize = (data['pagesize'] as num?)?.toInt() ?? 20;
+    final total = (data['numResults'] as num?)?.toInt() ?? 0;
     return (
       songs: [
         for (final item in items)
-          BiliSong(
-            bvid: '${item['bvid']}',
-            cid: 0,
-            title: _plain('${item['title']}'),
-            artist: '${item['author'] ?? ''}',
-            artistId: '${item['mid'] ?? ''}',
-            cover: _https(item['pic'] as String?),
-            duration: _seconds('${item['duration'] ?? '0'}'),
-            album: _plain('${item['title']}'),
-          ),
+          if ((item['type'] ?? 'video') == 'video' &&
+              bv.hasMatch('${item['bvid']}'))
+            BiliSong(
+              bvid: '${item['bvid']}',
+              cid: 0,
+              title: _plain('${item['title']}'),
+              artist: '${item['author'] ?? ''}',
+              artistId: '${item['mid'] ?? ''}',
+              cover: _https(item['pic'] as String?),
+              duration: _seconds('${item['duration'] ?? '0'}'),
+              album: _plain('${item['title']}'),
+            ),
       ],
-      total: (data['numResults'] as num?)?.toInt() ?? items.length,
-      pageSize: (data['pagesize'] as num?)?.toInt() ?? 20,
+      total: total,
+      pageSize: pageSize,
+      pages:
+          (data['numPages'] as num?)?.toInt() ??
+          (total <= 0 ? 0 : (total + pageSize - 1) ~/ pageSize),
     );
   }
 

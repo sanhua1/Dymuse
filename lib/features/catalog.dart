@@ -612,7 +612,10 @@ class Catalog extends ChangeNotifier {
       return CatalogPage(
         tracks: list,
         total: total,
-        nextOffset: _next(offset, raw.length, total),
+        // 后端给出显式游标时以它为准（B 站搜索会滤掉无效条目，条数不等于页大小）。
+        nextOffset: data.containsKey('nextOffset')
+            ? (data['nextOffset'] as num?)?.toInt()
+            : _next(offset, raw.length, total),
       );
     }
 

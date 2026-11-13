@@ -247,6 +247,21 @@ class BilibiliBackend {
   /// 最近一次出现在搜索结果里的歌曲；详情与队列沿用同样的歌名。
   final Set<String> _fromSearch = {};
 
+  /// 当前在线搜索词已加载过的各页结果（页码 → 歌曲）。点搜索结果里的歌时，
+  /// 队列就是界面上已加载的这些结果，而不是重新搜一次第 1 页。
+  String? _searchQuery;
+  final Map<int, List<BiliJson>> _searchPages = {};
+
+  /// 按页码顺序拼接已加载的搜索结果，跨页重复的视频只保留第一次出现的。
+  List<BiliJson> _loadedSearch() {
+    final seen = <String>{};
+    return [
+      for (final page in _searchPages.keys.toList()..sort())
+        for (final song in _searchPages[page]!)
+          if (seen.add(_idOf(song))) song,
+    ];
+  }
+
   String _idOf(BiliJson song) => '${song['bvid']}:${song['cid']}';
 
   /// 展示用的歌名：开启歌名识别时从标题里取出真正的歌名，原标题另存在 rawTitle。
@@ -523,10 +538,17 @@ class BilibiliBackend {
     final result = await client.search(q, page: page);
     final songs = [for (final song in result.songs) song.toJson()];
     _remember(songs);
+    if (_searchQuery != q || page == 1) {
+      _searchQuery = q;
+      _searchPages.clear();
+    }
+    _searchPages[page] = songs;
     return {
       'items': await _views(songs, search: true),
       'total': result.total,
       'pageSize': result.pageSize,
+      // 无效条目被滤掉后本页可能不足 20 条，翻页必须按页码走，不能按条数累加。
+      'nextOffset': page < result.pages ? page * 20 : null,
     };
   }
 
@@ -909,7 +931,15 @@ class BilibiliBackend {
             ? []
             : inSubs
             ? _searchSubscriptions(q)
-            : [for (final s in (await client.search(q)).songs) s.toJson()];
+            : _searchQuery == q
+            ? _loadedSearch()
+            : [];
+        // 没有对应的已加载结果（例如重启后）才重新搜第 1 页。
+        if (!inSubs &&
+            q.isNotEmpty &&
+            !songs.any((song) => _idOf(song) == selectedId)) {
+          songs = [for (final s in (await client.search(q)).songs) s.toJson()];
+        }
     }
     _remember(songs);
     if (searching) {

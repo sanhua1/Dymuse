@@ -115,6 +115,14 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   final _errors = StreamController<String>.broadcast();
   DateTime _lastCommand = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _bufferingSince = DateTime.now();
+
+  /// 正在经本机代理装载音源；此时的 -1004 由 [_setSource] 重建播放器后重试，
+  /// 错误流不先上报，否则重试成功后界面仍留着“音频无法播放”。
+  bool _loadingProxied = false;
+
+  /// 错误流上的错误是否直接上报给播放控制器。
+  static bool reportsStreamError(int code, {required bool loadingProxied}) =>
+      !(loadingProxied && code == -1004);
   @override
   final PositionNotifier position = PositionNotifier();
   @override
@@ -169,6 +177,9 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
       }),
       _player.errorStream.listen((error) {
         Diag.log('audio error code=${error.code} ${error.message}');
+        if (!reportsStreamError(error.code, loadingProxied: _loadingProxied)) {
+          return;
+        }
         _errors.add('${error.message}');
       }),
     ]);
@@ -208,6 +219,7 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   }) async {
     for (var attempt = 0; ; attempt++) {
       try {
+        _loadingProxied = proxied && attempt == 0;
         await _player.setAudioSource(await build(), initialPosition: offset);
         return true;
       } on ja.PlayerInterruptedException {
@@ -221,6 +233,8 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
         }
         _errors.add('${error.message}');
         return false;
+      } finally {
+        _loadingProxied = false;
       }
     }
   }

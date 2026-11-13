@@ -7,8 +7,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 与 pubspec.yaml 的 version 保持一致（测试会核对）；发版时一起改。
-const appVersion = '0.2.4';
-const appBuild = 6;
+const appVersion = '0.2.5';
+const appBuild = 7;
 
 /// 一个发布源：用它的接口读取最新 Release，再按 tag 和文件名拼出下载地址。
 class UpdateSource {
