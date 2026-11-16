@@ -76,6 +76,8 @@ class NowPlaying {
       );
     }
     final playing = engine.playing.value;
+    // 切歌、自动连播的装载间隙：声音暂停但马上要继续播，系统按“缓冲中”处理而不是“已暂停”。
+    final loading = !playing && controller.starting;
     final position = engine.position.value;
     final Map<String, Object?>? info = track == null
         ? null
@@ -86,13 +88,15 @@ class NowPlaying {
             'durationMs': engine.duration.value.inMilliseconds,
             'positionMs': position.inMilliseconds,
             'playing': playing,
+            'loading': loading,
             // 网易云与 B 站的封面都是公开的 https 图片，系统可自行下载。
             if (track.cover?.startsWith('http') == true)
               'artwork': track.cover!.replaceFirst('http://', 'https://'),
           };
     final signature = info == null
         ? ''
-        : '${track!.mode.name}:${track.id}:$playing:${info['durationMs']}';
+        : '${track!.mode.name}:${track.id}:$playing:$loading:'
+              '${info['durationMs']}';
     if (signature == _sent) return;
     _sent = signature;
     _base = position;

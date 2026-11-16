@@ -18,6 +18,7 @@ class PlaybackController extends ChangeNotifier {
       engine.completed.listen((_) {
         if (!_changing && current != null) {
           listening.finish('completed');
+          _autoFailures = 0;
           next(automatic: true);
         }
       }),
@@ -27,13 +28,16 @@ class PlaybackController extends ChangeNotifier {
         Diag.log(
           'engine error mode=${mode.name} track=${current?.id}: $detail',
         );
-        if (current == null) return;
-        listening.finish('error');
-        error = '音频无法播放（$detail）。可重试；来源也可能暂时不可用。';
-        notifyListeners();
+        _onEngineError(detail);
       }),
     );
+    engine.buffering.addListener(_watchStall);
     _timer = Timer.periodic(const Duration(seconds: 10), (_) {
+      // 已经正常播了一段，说明连播恢复了，之后的失败重新计数。
+      if (engine.playing.value &&
+          engine.position.value > const Duration(seconds: 5)) {
+        _autoFailures = 0;
+      }
       if (snapshot != null && !_changing && !_savingScheduled) {
         _savingScheduled = true;
         _command(() => _save()).whenComplete(() => _savingScheduled = false);
@@ -80,6 +84,30 @@ class PlaybackController extends ChangeNotifier {
   _prefetched;
   String? error;
   bool loading = false;
+
+  /// 正在装载并且装载完要播放（切歌、连播途中）。系统媒体会话按“缓冲中”显示，
+  /// Android 前台服务据此在切歌间隙保持 CPU 与 Wi-Fi 唤醒。
+  bool get starting => loading && _startPlaying;
+  bool _startPlaying = false;
+
+  /// 当前歌曲是不是自动连播接上的；只有自动连播中的失败才自动重试或跳过。
+  bool _autoChain = false;
+
+  /// 自动连播中连续失败的次数：第 1、3 次重试同一首，第 2 次跳到下一首，第 [_maxAutoFailures] 次停下报错。
+  int _autoFailures = 0;
+  static const _maxAutoFailures = 4;
+
+  /// 卡顿检测：播放中几秒内在同一位置反复进入缓冲，判定为卡死。
+  final List<DateTime> _stallMarks = [];
+  Duration _stallPosition = Duration.zero;
+  String? _stallTrack;
+  int _stallRecoveries = 0;
+  static const _stallWindow = Duration(seconds: 3);
+  static const _stallCount = 5;
+  static const _maxStallRecoveries = 2;
+
+  /// 已安排重试或跳过、新音源还没开始装载；这期间到达的错误属于刚失败的那次装载，忽略。
+  bool _recovering = false;
   bool extending = false;
   bool _manualExtensionQueued = false;
   bool _changing = false;
@@ -361,8 +389,11 @@ class PlaybackController extends ChangeNotifier {
   }) {
     if (track.mode != mode) return Future.value();
     final intent = ++_intent;
+    _autoChain = false;
+    _autoFailures = 0;
     _changing = true;
     loading = true;
+    _startPlaying = true;
     error = null;
     current = null;
     pending = track;
@@ -525,6 +556,7 @@ class PlaybackController extends ChangeNotifier {
       'play=$play pos=${position}ms quality=${quality.level}',
     );
     loading = true;
+    _startPlaying = play;
     error = null;
     if (current == null && pending?.id != item['id'].toString()) {
       pending = _placeholder(item);
@@ -555,6 +587,7 @@ class PlaybackController extends ChangeNotifier {
       current = resolved.track;
       pending = null;
       listening.begin(resolved.track, snapshot);
+      _recovering = false;
       await engine.open(
         resolved.url,
         resolved.headers,
@@ -570,7 +603,10 @@ class PlaybackController extends ChangeNotifier {
       listening.ready();
       if (play) unawaited(_prefetch(intent));
     } finally {
-      if (intent == _intent) loading = false;
+      if (intent == _intent) {
+        loading = false;
+        _recovering = false;
+      }
     }
   }
 
@@ -675,11 +711,17 @@ class PlaybackController extends ChangeNotifier {
     }).whenComplete(() => _manualExtensionQueued = false);
   }
 
-  Future<void> select(int selected) {
+  /// 用户点选队列里的一首。
+  Future<void> select(int selected) => _select(selected);
+
+  Future<void> _select(int selected, {bool automatic = false}) {
     if (selected < 0 || selected >= items.length) return Future.value();
     final intent = ++_intent;
+    _autoChain = automatic;
+    if (!automatic) _autoFailures = 0;
     _changing = true;
     loading = true;
+    _startPlaying = true;
     error = null;
     current = null;
     pending = _placeholder(items[selected]);
@@ -707,7 +749,9 @@ class PlaybackController extends ChangeNotifier {
   Future<void> next({bool automatic = false}) {
     Diag.log('next automatic=$automatic index=$index/${items.length}');
     if (items.isEmpty) return Future.value();
-    if (automatic && repeat == 'one') return select(index);
+    if (automatic && repeat == 'one') {
+      return _select(index, automatic: automatic);
+    }
     if (shuffle && items.length > 1) {
       _syncShuffle();
       if (_shuffled.isEmpty || _shuffled.last != index) _shuffled.add(index);
@@ -725,20 +769,25 @@ class PlaybackController extends ChangeNotifier {
         ];
       }
       if (remaining.isNotEmpty) {
-        return select(remaining[_random.nextInt(remaining.length)]);
+        return _select(
+          remaining[_random.nextInt(remaining.length)],
+          automatic: automatic,
+        );
       }
       return _command(() async {
         await engine.pause();
         await _save();
       });
     }
-    if (index + 1 < items.length) return select(index + 1);
+    if (index + 1 < items.length) {
+      return _select(index + 1, automatic: automatic);
+    }
     if (fm) {
       final intent = _intent, generation = snapshot?['generation'];
       return moreFm(manual: false).then<void>((_) async {
         if (intent != _intent || snapshot?['generation'] != generation) return;
         if (index + 1 < items.length) {
-          await select(index + 1);
+          await _select(index + 1, automatic: automatic);
         } else {
           await _command(() async {
             await engine.pause();
@@ -747,7 +796,7 @@ class PlaybackController extends ChangeNotifier {
         }
       });
     }
-    if (repeat == 'all') return select(0);
+    if (repeat == 'all') return _select(0, automatic: automatic);
     return _command(() async {
       await engine.pause();
       await _save();
@@ -796,6 +845,13 @@ class PlaybackController extends ChangeNotifier {
   });
   Future<void> retry() {
     Diag.log('retry id=${current?.id} error=$error');
+    _autoChain = false;
+    _autoFailures = 0;
+    return _reload();
+  }
+
+  /// 重新装载当前歌曲（重新取链），从当前位置继续。
+  Future<void> _reload() {
     final intent = ++_intent;
     return _command(
       () => _load(
@@ -804,6 +860,85 @@ class PlaybackController extends ChangeNotifier {
         position: engine.position.value.inMilliseconds,
       ),
     );
+  }
+
+  /// 播放失败：自动连播途中先重试同一首（重新取链），再失败就跳到下一首，
+  /// 第 [_maxAutoFailures] 次失败才停下显示错误，避免断网时一路跳完整个队列。
+  /// 用户亲自点的歌失败时照常报错，由用户决定重试还是换歌。
+  void _onEngineError(String detail) {
+    if (current == null || _recovering) return;
+    listening.finish('error');
+    if (_autoChain && _autoFailures + 1 < _maxAutoFailures) {
+      _autoFailures++;
+      _recovering = true;
+      if (_autoFailures.isOdd) {
+        Diag.log(
+          'auto recover: retry id=${current?.id} failures=$_autoFailures',
+        );
+        unawaited(_reload());
+      } else {
+        Diag.log(
+          'auto recover: skip id=${current?.id} failures=$_autoFailures',
+        );
+        final before = _intent;
+        // 队列已到末尾、没有下一首可换时，next 只会暂停，这时仍要显示错误。
+        unawaited(
+          next(automatic: true).then((_) {
+            if (_intent == before) {
+              _recovering = false;
+              _showError(detail);
+            }
+          }),
+        );
+      }
+      return;
+    }
+    _showError(detail);
+  }
+
+  /// 播放中 [_stallWindow] 内进入缓冲 [_stallCount] 次、位置几乎没动：播放器在原地
+  /// 反复重连（本机代理同一处断开），自己出不来。在当前位置重新取链装载，相当于替
+  /// 用户拖一下进度条；同一首最多 [_maxStallRecoveries] 次，仍卡住就暂停并报错。
+  void _watchStall() {
+    if (!engine.buffering.value ||
+        !engine.playing.value ||
+        loading ||
+        _changing ||
+        current == null) {
+      return;
+    }
+    final now = DateTime.now(), position = engine.position.value;
+    if (_stallTrack != current!.id) {
+      _stallTrack = current!.id;
+      _stallRecoveries = 0;
+      _stallMarks.clear();
+    }
+    _stallMarks.removeWhere((mark) => now.difference(mark) > _stallWindow);
+    if (_stallMarks.isEmpty ||
+        (position - _stallPosition).abs() > const Duration(seconds: 2)) {
+      _stallMarks.clear();
+      _stallPosition = position;
+    }
+    _stallMarks.add(now);
+    if (_stallMarks.length < _stallCount) return;
+    _stallMarks.clear();
+    if (_stallRecoveries >= _maxStallRecoveries) {
+      Diag.log('stall persists id=${current?.id} pos=${position.inSeconds}s');
+      unawaited(engine.pause());
+      _showError('同一位置反复缓冲');
+      return;
+    }
+    _stallRecoveries++;
+    Diag.log(
+      'stall detected id=${current?.id} pos=${position.inSeconds}s, '
+      'reloading ($_stallRecoveries/$_maxStallRecoveries)',
+    );
+    unawaited(_reload());
+  }
+
+  void _showError(String detail) {
+    error = '音频无法播放（$detail）。可重试；来源也可能暂时不可用。';
+    notifyListeners();
   }
 
   Future<void> seek(Duration value) => _command(() async {
@@ -1017,6 +1152,7 @@ class PlaybackController extends ChangeNotifier {
     _disposed = true;
     ++_intent;
     _timer?.cancel();
+    engine.buffering.removeListener(_watchStall);
     listening.dispose();
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());

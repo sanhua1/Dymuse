@@ -2,21 +2,11 @@ import 'package:dymuse/playback/audio_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('经代理装载时的 -1004 交给重试处理，错误流不先上报', () {
-    expect(
-      JustAudioEngine.reportsStreamError(-1004, loadingProxied: true),
-      isFalse,
-    );
+  test('装载中的错误交给装载调用处理（-1004 重试，其他上报一次），错误流不先上报', () {
+    expect(JustAudioEngine.reportsStreamError(loading: true), isFalse);
   });
 
-  test('其他错误、或不在代理装载中的 -1004 照常上报', () {
-    expect(
-      JustAudioEngine.reportsStreamError(-1100, loadingProxied: true),
-      isTrue,
-    );
-    expect(
-      JustAudioEngine.reportsStreamError(-1004, loadingProxied: false),
-      isTrue,
-    );
+  test('播放途中（不在装载）的错误照常从错误流上报', () {
+    expect(JustAudioEngine.reportsStreamError(loading: false), isTrue);
   });
 }

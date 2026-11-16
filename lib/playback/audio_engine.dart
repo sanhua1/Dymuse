@@ -116,13 +116,14 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   DateTime _lastCommand = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _bufferingSince = DateTime.now();
 
-  /// 正在经本机代理装载音源；此时的 -1004 由 [_setSource] 重建播放器后重试，
-  /// 错误流不先上报，否则重试成功后界面仍留着“音频无法播放”。
-  bool _loadingProxied = false;
+  /// 装载音源期间，装载失败时 just_audio 会在错误流上报一次、装载调用再抛一次，
+  /// 由 [_setSource] 统一处理（-1004 重建播放器重试，其他上报一次），错误流不重复上报；
+  /// 否则一次失败报两次，或重试成功后界面仍留着“音频无法播放”。
+  /// 进行中的装载数（新装载会打断旧装载，二者可能短暂重叠）。
+  int _loads = 0;
 
   /// 错误流上的错误是否直接上报给播放控制器。
-  static bool reportsStreamError(int code, {required bool loadingProxied}) =>
-      !(loadingProxied && code == -1004);
+  static bool reportsStreamError({required bool loading}) => !loading;
   @override
   final PositionNotifier position = PositionNotifier();
   @override
@@ -177,7 +178,7 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
       }),
       _player.errorStream.listen((error) {
         Diag.log('audio error code=${error.code} ${error.message}');
-        if (!reportsStreamError(error.code, loadingProxied: _loadingProxied)) {
+        if (!reportsStreamError(loading: _loads > 0)) {
           return;
         }
         _errors.add('${error.message}');
@@ -219,7 +220,7 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   }) async {
     for (var attempt = 0; ; attempt++) {
       try {
-        _loadingProxied = proxied && attempt == 0;
+        _loads++;
         await _player.setAudioSource(await build(), initialPosition: offset);
         return true;
       } on ja.PlayerInterruptedException {
@@ -234,7 +235,7 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
         _errors.add('${error.message}');
         return false;
       } finally {
-        _loadingProxied = false;
+        _loads--;
       }
     }
   }
@@ -303,6 +304,7 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
               Uri.parse(url),
               headers: headers.isEmpty ? null : headers,
               file: file,
+              label: cacheKey ?? '',
             )
           : ja.AudioSource.uri(
               Uri.parse(url),

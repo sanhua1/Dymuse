@@ -6,6 +6,8 @@ import 'dart:math' as math;
 
 import 'package:just_audio/just_audio.dart' as ja;
 
+import '../core/diag.dart';
+
 /// 边下边播并写入缓存的音频源，替代 just_audio 的 LockCachingAudioSource。
 ///
 /// 网易云 CDN 支持 Range，但完整响应不带 Accept-Ranges 头；LockCachingAudioSource
@@ -15,11 +17,19 @@ import 'package:just_audio/just_audio.dart' as ja;
 /// 切歌时取消其他歌曲的下载（[cancelOthers]），快速连切时不会有十几个整首下载
 /// 同时抢带宽，导致当前歌曲读不到数据而报错。
 class CachingAudioSource extends ja.StreamAudioSource {
-  CachingAudioSource(this.uri, {this.headers, required this.file});
+  CachingAudioSource(
+    this.uri, {
+    this.headers,
+    required this.file,
+    this.label = '',
+  });
 
   final Uri uri;
   final Map<String, String>? headers;
   final File file;
+
+  /// 写日志用的歌曲标识（缓存键，如 `netease:123:lossless`），不含链接与凭证。
+  final String label;
 
   /// 同一首歌只保留一个下载，重复播放时共用，避免两个任务写同一个 .part。
   static final _downloads = <String, _Download>{};
@@ -34,8 +44,63 @@ class CachingAudioSource extends ja.StreamAudioSource {
     }
   }
 
+  /// just_audio 的本机代理会吞掉数据流里的错误，只把响应提前结束，播放器随即从
+  /// 同一位置重连；同一处反复出错时就表现为原地反复缓冲。这里把每次请求、出错和
+  /// 提前结束都写进诊断日志，便于定位是哪一步断的。
   @override
   Future<ja.StreamAudioResponse> request([int? start, int? end]) async {
+    final range = '${start ?? 0}-${end ?? ''}';
+    final ja.StreamAudioResponse response;
+    try {
+      response = await _request(start, end);
+    } catch (error) {
+      Diag.log('cache proxy request failed $label range=$range: $error');
+      rethrow;
+    }
+    return ja.StreamAudioResponse(
+      rangeRequestsSupported: response.rangeRequestsSupported,
+      sourceLength: response.sourceLength,
+      contentLength: response.contentLength,
+      offset: response.offset,
+      contentType: response.contentType,
+      stream: _logged(response.stream, range, response.contentLength),
+    );
+  }
+
+  /// 数据流出错时记下已发出的字节数与原因再抛出；播放器主动断开（取消订阅）不记。
+  Stream<List<int>> _logged(
+    Stream<List<int>> stream,
+    String range,
+    int? expected,
+  ) {
+    var sent = 0;
+    return stream.transform(
+      StreamTransformer<List<int>, List<int>>.fromHandlers(
+        handleData: (chunk, sink) {
+          sent += chunk.length;
+          sink.add(chunk);
+        },
+        handleError: (error, trace, sink) {
+          Diag.log(
+            'cache proxy stream failed $label range=$range '
+            'sent=$sent/${expected ?? '?'}: $error',
+          );
+          sink.addError(error, trace);
+        },
+        handleDone: (sink) {
+          if (expected != null && sent < expected) {
+            Diag.log(
+              'cache proxy stream short $label range=$range '
+              'sent=$sent/$expected',
+            );
+          }
+          sink.close();
+        },
+      ),
+    );
+  }
+
+  Future<ja.StreamAudioResponse> _request(int? start, int? end) async {
     if (file.existsSync()) return _fromFile(start, end);
     final download = _downloads.putIfAbsent(
       file.path,

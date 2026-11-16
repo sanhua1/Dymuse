@@ -14,10 +14,12 @@ import android.graphics.drawable.Icon
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import io.flutter.plugin.common.MethodChannel
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,8 +32,13 @@ data class NowPlayingState(
     val durationMs: Long,
     val positionMs: Long,
     val playing: Boolean,
+    /// 切歌装载中、马上要继续播放（自动连播的间隙）。
+    val loading: Boolean,
     val artwork: String?,
-)
+) {
+    /// 正在播放或正要播放：保持唤醒，媒体会话不显示为暂停。
+    val active get() = playing || loading
+}
 
 object NowPlayingBridge {
     @Volatile var channel: MethodChannel? = null
@@ -51,6 +58,7 @@ object NowPlayingBridge {
             durationMs = (args["durationMs"] as? Number)?.toLong() ?: 0L,
             positionMs = (args["positionMs"] as? Number)?.toLong() ?: 0L,
             playing = args["playing"] as? Boolean ?: false,
+            loading = args["loading"] as? Boolean ?: false,
             artwork = args["artwork"] as? String,
         )
         val running = MediaPlaybackService.instance
@@ -87,9 +95,22 @@ class MediaPlaybackService : Service() {
     private var artworkUrl: String? = null
     private var artwork: Bitmap? = null
 
+    /// 播放和切歌期间持有。正在出声时系统音频会让 CPU 保持清醒，但自动连播切歌的
+    /// 几百毫秒里没有声音，锁屏后 CPU 与 Wi-Fi 可能随即休眠：读缓存的本机代理停住、
+    /// 网络取流超时，下一首要等亮屏才开始或直接报“音频无法播放”。
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
+        wakeLock = getSystemService(PowerManager::class.java)
+            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Dymuse:playback")
+            ?.apply { setReferenceCounted(false) }
+        @Suppress("DEPRECATION")
+        wifiLock = (applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
+            ?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "Dymuse:playback")
+            ?.apply { setReferenceCounted(false) }
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -131,12 +152,14 @@ class MediaPlaybackService : Service() {
 
     override fun onDestroy() {
         instance = null
+        hold(false)
         session.release()
         super.onDestroy()
     }
 
     fun stopPlayback() {
         main.post {
+            hold(false)
             stopForeground(true)
             session.isActive = false
             stopSelf()
@@ -158,6 +181,7 @@ class MediaPlaybackService : Service() {
             artwork = null
             loadArtwork(state.artwork)
         }
+        hold(state.active)
         session.isActive = true
         session.setMetadata(
             MediaMetadata.Builder()
@@ -177,7 +201,11 @@ class MediaPlaybackService : Service() {
                         PlaybackState.ACTION_STOP
                 )
                 .setState(
-                    if (state.playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+                    when {
+                        state.playing -> PlaybackState.STATE_PLAYING
+                        state.loading -> PlaybackState.STATE_BUFFERING
+                        else -> PlaybackState.STATE_PAUSED
+                    },
                     state.positionMs,
                     if (state.playing) 1f else 0f,
                 )
@@ -196,6 +224,20 @@ class MediaPlaybackService : Service() {
             }
         } catch (_: Exception) {
             // 后台里不允许新启动的前台服务；会话仍然有效，锁屏与耳机按键照常工作。
+        }
+    }
+
+    /// 取得或释放唤醒锁与 Wi-Fi 锁；用户暂停、停止或出错停下时释放，不额外耗电。
+    private fun hold(active: Boolean) {
+        try {
+            if (active) {
+                if (wakeLock?.isHeld == false) wakeLock?.acquire()
+                if (wifiLock?.isHeld == false) wifiLock?.acquire()
+            } else {
+                if (wakeLock?.isHeld == true) wakeLock?.release()
+                if (wifiLock?.isHeld == true) wifiLock?.release()
+            }
+        } catch (_: Exception) {
         }
     }
 
@@ -220,12 +262,12 @@ class MediaPlaybackService : Service() {
             .setSubText(state.album.ifEmpty { null })
             .setLargeIcon(artwork)
             .setContentIntent(open)
-            .setOngoing(state.playing)
+            .setOngoing(state.active)
             .setShowWhen(false)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .addAction(action(android.R.drawable.ic_media_previous, "上一首", ACTION_PREVIOUS, 1))
             .addAction(
-                if (state.playing) action(android.R.drawable.ic_media_pause, "暂停", ACTION_TOGGLE, 2)
+                if (state.active) action(android.R.drawable.ic_media_pause, "暂停", ACTION_TOGGLE, 2)
                 else action(android.R.drawable.ic_media_play, "播放", ACTION_TOGGLE, 2)
             )
             .addAction(action(android.R.drawable.ic_media_next, "下一首", ACTION_NEXT, 3))
