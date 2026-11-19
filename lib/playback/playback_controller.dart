@@ -386,6 +386,7 @@ class PlaybackController extends ChangeNotifier {
     Track track, {
     required Json context,
     Collection? collection,
+    List<Track>? list,
   }) {
     if (track.mode != mode) return Future.value();
     final intent = ++_intent;
@@ -405,12 +406,20 @@ class PlaybackController extends ChangeNotifier {
         current = null;
         await engine.stop();
         if (intent != _intent) return;
-        // 每日推荐整张列表即队列；其他无集合的入口（搜索等）按所选歌曲推荐后续。
+        // 每日推荐整张列表即队列；给了 [list]（搜索结果点“播放”）时按该列表依序播放；
+        // 其他无集合的入口（搜索里点单曲等）按所选歌曲推荐后续。
         final daily =
             mode == MusicMode.netease &&
             !track.isPodcast &&
             collection == null &&
             context['kind'] == 'daily';
+        final ordered =
+            mode == MusicMode.netease &&
+            !track.isPodcast &&
+            collection == null &&
+            !daily &&
+            list != null &&
+            list.isNotEmpty;
         final path = mode == MusicMode.bilibili
             ? '/playback/bilibili/start'
             : track.isPodcast
@@ -419,6 +428,8 @@ class PlaybackController extends ChangeNotifier {
             ? '/netease/queues/collection'
             : daily
             ? '/netease/queues/daily'
+            : ordered
+            ? '/netease/queues/list'
             : '/netease/queues/search';
         final body = mode == MusicMode.bilibili
             ? {'context': context, 'selectedId': track.id}
@@ -433,6 +444,15 @@ class PlaybackController extends ChangeNotifier {
                 'kind': collection.kind,
                 'collectionId': collection.id,
                 'songId': track.id,
+              }
+            : ordered
+            ? {
+                'songId': track.id,
+                'items': [
+                  for (final item in list)
+                    if (item.available && !item.isPodcast)
+                      {'id': item.id, 'title': item.title},
+                ],
               }
             : {'songId': track.id};
         final result = await api.post(path, body) as Json;

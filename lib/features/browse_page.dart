@@ -972,8 +972,14 @@ class BrowsePage extends StatelessWidget {
   );
 
   /// 歌手主页里点单曲按该歌曲推荐后续音乐；点“播放”按钮（[wholeList]）则以歌手的歌曲列表为队列。
+  /// 网易云搜索结果同理：点单曲按推荐续播，点“播放”按已加载的搜索结果依序播放。
   void _play(Track track, {bool wholeList = false}) {
     if (!track.available) return;
+    final searchList =
+        wholeList &&
+        browser.mode == MusicMode.netease &&
+        browser.section == 'search' &&
+        browser.collection == null;
     playback.start(
       track,
       context: browser.queueContext,
@@ -983,6 +989,7 @@ class BrowsePage extends StatelessWidget {
               !wholeList
           ? null
           : browser.collection,
+      list: searchList ? browser.page.tracks : null,
     );
   }
 

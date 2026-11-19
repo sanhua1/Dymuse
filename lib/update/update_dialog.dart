@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/diag.dart';
 import '../design_system/tokens.dart';
 import 'android_installer.dart';
 import 'update_service.dart';
@@ -159,6 +160,13 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         _progress = null;
       });
       if (Platform.isMacOS) {
+        final blocker = await macAutoUpdateBlocker();
+        if (blocker == null) {
+          await startMacUpdate(file);
+          await SystemNavigator.pop(); // 真正退出（会先保存播放进度），脚本随后替换并重新打开
+          return;
+        }
+        Diag.log('mac update manual: $blocker');
         await prepareMacUpdate(file);
         if (!mounted) return;
         setState(() {

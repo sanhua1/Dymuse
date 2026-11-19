@@ -16,6 +16,7 @@ import 'design_system/tokens.dart';
 import 'features/catalog.dart';
 import 'link_service/link_service.dart';
 import 'platform/desktop_window.dart';
+import 'platform/mac_data_migration.dart';
 import 'platform/now_playing.dart';
 import 'playback/audio_engine.dart';
 import 'playback/audio_quality.dart';
@@ -51,6 +52,7 @@ Future<void> main() async {
   // 除 Windows（libmpv）外都用 just_audio，并启用歌曲缓存与系统播放控制。
   final justAudio = !Platform.isWindows;
   if (Platform.isWindows) MediaKit.ensureInitialized();
+  await migrateMacSandboxData(); // 必须在读取设置之前
   final preferences = await SharedPreferences.getInstance();
   await LiquidGlassWidgets.initialize(enablePerformanceMonitor: false);
   final api = ApiClient(), window = DesktopWindow();

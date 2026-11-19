@@ -220,6 +220,43 @@ void main() {
     expect((missing['state'] as Map)['index'], 0);
   });
 
+  test('搜索结果点“播放”：按传入列表依序建队、去重，不做推荐续推', () async {
+    final started = await call('POST', '/queues/list', {
+      'songId': '11',
+      'items': [
+        {'id': '11', 'title': '甲'},
+        {'id': '12', 'title': '乙'},
+        {'id': 'bad'},
+        {'id': '11', 'title': '甲'},
+        {'id': '13', 'title': '丙'},
+      ],
+    });
+    final state = started['state'] as Map;
+    expect(itemsOf(started).map((item) => item['id']), ['11', '12', '13']);
+    expect(state['index'], 0);
+    expect(state['origin'], 'manual');
+    await expectLater(
+      backend.handle('POST', '/queues/extend', null, {
+        'generation': started['generation'],
+      }),
+      throwsA(
+        isA<LocalError>().having(
+          (e) => e.code,
+          'code',
+          'NOT_RECOMMENDATION_QUEUE',
+        ),
+      ),
+    );
+    await expectLater(
+      backend.handle('POST', '/queues/list', null, {
+        'items': [
+          {'id': 'x'},
+        ],
+      }),
+      throwsA(isA<LocalError>().having((e) => e.status, 'status', 422)),
+    );
+  });
+
   test('进度保存、插入、移除与整份保存都推进 revision', () async {
     final started = await call('POST', '/queues/collection', {
       'kind': 'album',

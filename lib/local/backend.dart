@@ -948,6 +948,41 @@ class LocalBackend {
             'seedId': _text(input, 'songId'),
           }),
         );
+      case 'list':
+        // 界面上已加载的歌曲列表（如搜索结果点“播放”）：按原顺序作为队列，不追加推荐。
+        final raw = input['items'];
+        if (raw is! List) _fail(400, 'INVALID_ITEMS', '歌曲列表无效。');
+        if (raw.length > 10000) {
+          _fail(413, 'QUEUE_TOO_LARGE', '列表超过 10000 首，请选择较小列表。');
+        }
+        final items = <Map<String, dynamic>>[];
+        final known = <String>{};
+        for (final entry in raw) {
+          final id = '${entry is Map ? entry['id'] : ''}';
+          if (RegExp(r'^\d{1,20}$').hasMatch(id) && known.add(id)) {
+            items.add({
+              'id': id,
+              'mode': 'netease',
+              if (entry is Map && entry['title'] is String)
+                'title': entry['title'],
+            });
+          }
+        }
+        if (items.isEmpty) _fail(422, 'EMPTY_COLLECTION', '此列表没有可播放曲目。');
+        final selected = items.indexWhere(
+          (item) => item['id'] == input['songId']?.toString(),
+        );
+        return _present(
+          await _replace({
+            'items': items,
+            'index': selected < 0 ? 0 : selected,
+            'positionMs': 0,
+            'playing': false,
+            'shuffle': false,
+            'repeat': 'off',
+            'origin': 'manual',
+          }),
+        );
       case 'daily':
         final songId = _text(input, 'songId');
         final body = await client.recommendSongs();
