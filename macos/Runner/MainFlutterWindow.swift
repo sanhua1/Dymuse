@@ -9,6 +9,7 @@ class MainFlutterWindow: NSWindow {
   private(set) var windowChannel: FlutterMethodChannel?
 
   override func awakeFromNib() {
+    SandboxPreferences.migrate()  // 必须在 Flutter 读取设置之前
     let flutterViewController = FlutterViewController()
     flutterViewController.backgroundColor = .clear
     let windowFrame = self.frame
@@ -201,5 +202,37 @@ final class NowPlayingBridge {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = current
       }
     }.resume()
+  }
+}
+
+/// macOS 版从 0.2.7 起不再使用 App Sandbox，设置的位置从沙盒容器
+/// `~/Library/Containers/<标识>/Data/Library/Preferences/` 改为 `~/Library/Preferences/`。
+/// 首次以非沙盒启动时，把容器里的 Flutter 设置（`flutter.` 开头）逐项写进 UserDefaults，
+/// 只补新位置还没有的项（0.2.7 已经写入的新值不覆盖）；设备标识以容器里的为准，
+/// 因为 0.2.7 没读到旧设置时会重新生成一个。完成后记下标记，以后不再合并。
+/// 不能用 `defaults import`：容器存在时，`defaults` 命令会自动改写容器里的那份。原容器保留不动。
+enum SandboxPreferences {
+  private static let doneKey = "dymuse.sandboxPreferencesMigrated"
+
+  static func migrate() {
+    guard ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] == nil,
+      let id = Bundle.main.bundleIdentifier
+    else { return }
+    let defaults = UserDefaults.standard
+    guard !defaults.bool(forKey: doneKey) else { return }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    let file = home.appendingPathComponent(
+      "Library/Containers/\(id)/Data/Library/Preferences/\(id).plist")
+    if FileManager.default.fileExists(atPath: file.path) {
+      // 读不出来（例如系统拒绝访问容器）时不记标记，下次启动再试。
+      guard let old = NSDictionary(contentsOf: file) as? [String: Any] else { return }
+      for (key, value) in old
+      where key.hasPrefix("flutter.")
+        && (key == "flutter.deviceId" || defaults.object(forKey: key) == nil)
+      {
+        defaults.set(value, forKey: key)
+      }
+    }
+    defaults.set(true, forKey: doneKey)
   }
 }
