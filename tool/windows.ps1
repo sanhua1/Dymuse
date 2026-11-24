@@ -1,9 +1,12 @@
 param(
-    [ValidateSet('check', 'test', 'build', 'run', 'integration')]
+    # package：构建 Release 后生成发布用的安装包（Inno Setup）与给旧客户端更新用的 zip。
+    [ValidateSet('check', 'test', 'build', 'run', 'integration', 'package')]
     [string]$Action = 'build',
     [ValidateSet('debug', 'profile', 'release')]
     [string]$Mode = 'release',
     [string]$FlutterRoot = $env:DYMUSE_FLUTTER_ROOT,
+    # Inno Setup 6 的 ISCC.exe；不传时在常见安装位置查找。
+    [string]$Iscc = $env:DYMUSE_ISCC,
     # 联调用的编译期开关（形如 NAME=value），只对 build、run 生效。
     [string[]]$DartDefine = @()
 )
@@ -62,6 +65,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'CMake 本地缓存修正失败。' }
         }
 
+        if ($Action -eq 'package') { $Mode = 'release' }
         switch ($Action) {
             'check' { & $flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings }
             'test' {
@@ -71,12 +75,12 @@ try {
                     ForEach-Object { $_.FullName })
                 & $flutter test --no-pub @tests
             }
-            'build' { & $flutter build windows "--$Mode" --no-pub @($DartDefine | ForEach-Object { "--dart-define=$_" }) }
+            { $_ -in 'build', 'package' } { & $flutter build windows "--$Mode" --no-pub @($DartDefine | ForEach-Object { "--dart-define=$_" }) }
             'run' { & $flutter run -d windows "--$Mode" --no-pub @($DartDefine | ForEach-Object { "--dart-define=$_" }) }
             'integration' { & $flutter test integration_test/windows_test.dart -d windows --no-pub }
         }
         if ($LASTEXITCODE -ne 0) { throw "Flutter $Action 失败，退出码 $LASTEXITCODE。" }
-        if ($Action -eq 'build') {
+        if ($Action -in 'build', 'package') {
             # exe、插件和资源是一整套产物，缺失时不能当作构建成功交付。
             $bundle = Join-Path $project "build\windows\x64\runner\$Mode"
             $requiredFiles = @('dymuse.exe', 'flutter_windows.dll', 'libmpv-2.dll',
@@ -89,6 +93,36 @@ try {
                 if (!(Test-Path -LiteralPath (Join-Path $bundle $file))) { throw "构建产物不完整：$file" }
             }
             Write-Output "完整应用目录：$bundle"
+        }
+        if ($Action -eq 'package') {
+            # 版本号取自 pubspec.yaml（形如 0.2.8+10）。
+            $line = Select-String -LiteralPath (Join-Path $project 'pubspec.yaml') -Pattern '^version:\s*(\d+\.\d+\.\d+)\+(\d+)' | Select-Object -First 1
+            if (!$line) { throw 'pubspec.yaml 里没有找到 version。' }
+            $version = $line.Matches[0].Groups[1].Value
+            $build = $line.Matches[0].Groups[2].Value
+            if (!$Iscc) {
+                $Iscc = @(
+                    (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
+                    (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe'),
+                    (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe')
+                ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+            }
+            if (!$Iscc) { throw '找不到 Inno Setup 6 的 ISCC.exe，请安装或传入 -Iscc。' }
+            $dist = Join-Path $project "build\windows\dist\$version"
+            New-Item -ItemType Directory -Force -Path $dist | Out-Null
+            & $Iscc /Q "/DAppVersion=$version" "/DAppBuild=$build" "/DSourceDir=$bundle" "/DOutputDir=$dist" (Join-Path $project 'windows\installer\dymuse.iss')
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup 打包失败，退出码 $LASTEXITCODE。" }
+            # 0.2.8 以前的客户端只认 zip（解压覆盖程序目录），继续一起发布。
+            $zip = Join-Path $dist 'Dymuse-windows-x64.zip'
+            # 构建中间产物（.lib/.exp/.pdb）不进包。
+            $items = @(Get-ChildItem -LiteralPath $bundle -Force |
+                Where-Object { $_.PSIsContainer -or $_.Extension -notin '.lib', '.exp', '.pdb' } |
+                ForEach-Object { $_.FullName })
+            Compress-Archive -LiteralPath $items -DestinationPath $zip -Force
+            foreach ($file in @((Join-Path $dist 'Dymuse-windows-x64-setup.exe'), $zip)) {
+                $item = Get-Item -LiteralPath $file
+                Write-Output ("{0}  {1} 字节  sha256 {2}" -f $item.FullName, $item.Length, (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower())
+            }
         }
     } finally { Pop-Location }
 } finally {

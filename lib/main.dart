@@ -18,6 +18,7 @@ import 'link_service/link_service.dart';
 import 'platform/desktop_window.dart';
 import 'platform/mac_data_migration.dart';
 import 'platform/now_playing.dart';
+import 'platform/preferences_guard.dart';
 import 'playback/audio_engine.dart';
 import 'playback/audio_quality.dart';
 import 'playback/playback_controller.dart';
@@ -53,6 +54,7 @@ Future<void> main() async {
   final justAudio = !Platform.isWindows;
   if (Platform.isWindows) MediaKit.ensureInitialized();
   await migrateMacSandboxData(); // 必须在读取设置之前
+  await guardWindowsPreferences(); // 设置文件损坏时留存后以默认设置启动，否则窗口出不来
   final preferences = await SharedPreferences.getInstance();
   await LiquidGlassWidgets.initialize(enablePerformanceMonitor: false);
   final api = ApiClient(), window = DesktopWindow();
@@ -79,7 +81,8 @@ Future<void> main() async {
   playback.quality = AudioQuality.fromName(
     preferences.getString('audioQuality'),
   );
-  if (justAudio) NowPlaying(playback);
+  // 各端都接系统播放控制；Windows 由 runner 里的 SMTC 实现（system_media.cpp）。
+  NowPlaying(playback);
   final appearance =
       Appearance(
           brightness: switch (preferences.getString('appearance')) {

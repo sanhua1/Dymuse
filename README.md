@@ -87,7 +87,15 @@
 **说明**
 
 - 已经装了 0.2.7 的 Mac 可以在应用内直接自动更新到 0.2.8；从 0.2.6 及更早版本升级时仍需最后一次手动拖动替换。
-- 本次发布提供 macOS、Android 与 iOS（未签名 IPA）安装包；Windows 包稍后发布。Android 与 iOS 没有功能变化。
+- 本次发布提供 macOS、Android 与 iOS（未签名 IPA）安装包。Android 与 iOS 没有功能变化。
+
+**Windows（2026-11-24 补发）**
+
+- **改为安装包**：新增 `Dymuse-windows-x64-setup.exe`，默认装到 `C:\Program Files\Dymuse`，创建开始菜单快捷方式（桌面快捷方式可选），可以在“应用和功能”里卸载。卸载时不会删除设置和登录数据。
+- **应用内更新改用安装包**：以后有新版时点“更新”，Dymuse 会下载并校验安装包，然后静默安装到当前程序目录，系统弹出管理员确认后自动完成并重新打开。以前的绿色版（zip）通过应用内更新升级后，也会变成已安装的版本，目录不变。
+- **系统媒体控制**：Windows 的媒体浮窗、键盘媒体键和锁屏会显示当前歌曲，并且可以播放、暂停、切换上一首或下一首、拖动进度。
+- **设置文件损坏时也能打开**：如果设置文件在写入时因为崩溃或断电损坏，以前会一直打不开（只有进程、没有窗口）。现在会把坏文件改名保留，然后用默认设置启动；网易云登录不受影响。
+- 仍在使用 0.2.1 绿色版的用户，可以在应用内直接更新（仍使用 zip 包），也可以下载安装包重新安装。
 
 ### 0.2.7
 
@@ -209,7 +217,7 @@
 
 ## 当前状态
 
-iOS 与 macOS 完成度较高；Android 已可用，只在作者的一台 Sony Xperia 5 IV 上测试过，横屏与平板布局、不同厂商系统的通知表现还没有验证；Windows、Linux 暂未适配。项目由个人开发，很多功能只在作者自己的设备和账号上验证过，欢迎提 issue。
+iOS 与 macOS 完成度较高；Android 已可用，只在作者的一台 Sony Xperia 5 IV 上测试过，横屏与平板布局、不同厂商系统的通知表现还没有验证；Windows 已有安装包，只在作者的一台电脑上测试过；Linux 暂未适配。项目由个人开发，很多功能只在作者自己的设备和账号上验证过，欢迎提 issue。
 
 ## 构建
 
@@ -226,6 +234,7 @@ flutter build apk --release --target-platform android-arm64   # Android，产物
 - **Android 安装包体积**：不加 `--target-platform` 会打包 arm64、armeabi-v7a、x86_64 三套架构，约 60MB；只打 arm64 约 22MB，Release 里的 APK 就是 arm64 的。
 - **Android 签名**：release 暂用调试签名，方便自行侧载安装。要长期分发请在 `android/app/build.gradle.kts` 里换成你自己的发布密钥，并同样替换包名 `app.dymuse.allinone`。
 - **Android 播放通知**：第一次播放时会请求通知权限（Android 13+），不授权也能播放，只是没有通知栏控制。
+- **Windows**：需要 Visual Studio 2022 的 C++ 桌面开发工具与 Windows SDK。在 PowerShell 7 里运行 `./tool/windows.ps1 -Action build` 构建；`-Action package` 会再用 Inno Setup 6 生成安装包和 zip，输出到 `build/windows/dist/<版本>/`。
 - **macOS 钥匙串**：默认的临时签名每次构建都不同，钥匙串里的登录凭证会反复弹窗。用 `DYMUSE_SIGN_IDENTITY="Apple Development: …" tool/build_mac.sh` 以固定证书构建可避免。
 - `tool/` 下是只读的联网探测脚本，不在默认测试里。
 

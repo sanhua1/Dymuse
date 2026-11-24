@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:dymuse/update/update_service.dart';
+import 'package:dymuse/update/windows_installer.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -15,6 +16,19 @@ void main() {
     expect(compareVersions('1.0', '1.0.0'), 0);
     expect(compareVersions('0.2.0+5', '0.2.0'), 0);
     expect(compareVersions('0.1.9', '0.2.0'), lessThan(0));
+  });
+
+  test('Windows 安装包静默装到当前程序目录', () {
+    expect(
+      windowsSetupArguments(r'C:\Program Files\Dymuse', r'C:\Temp\update.log'),
+      [
+        '/SILENT',
+        '/SUPPRESSMSGBOXES',
+        '/NORESTART',
+        r'/DIR=C:\Program Files\Dymuse',
+        r'/LOG=C:\Temp\update.log',
+      ],
+    );
   });
 
   test('代码里的版本号与 pubspec.yaml 一致', () {
@@ -119,6 +133,23 @@ void main() {
       final ios = (await service(platform: 'ios').check())!;
       expect(ios.asset, isNull);
       expect(ios.downloadUrls, isEmpty);
+    });
+
+    test('Windows 用安装包：清单同时有 zip 与安装包时取安装包', () async {
+      (manifestBody['assets'] as Map)[UpdateService.windowsSetupKey] = {
+        'name': 'Dymuse-windows-x64-setup.exe',
+        'size': package.length,
+        'sha256': goodSha,
+      };
+      final setup = (await service(
+        platform: UpdateService.windowsSetupKey,
+      ).check())!;
+      expect(setup.asset!.name, 'Dymuse-windows-x64-setup.exe');
+      // 旧客户端仍按 windows-x64 取到 zip。
+      expect((await service().check())!.asset!.name, 'pkg.zip');
+      if (Platform.isWindows) {
+        expect(UpdateService.platformKey(), UpdateService.windowsSetupKey);
+      }
     });
 
     test('第一个源不可用就回退到下一个；都不可用则报错', () async {

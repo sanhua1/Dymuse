@@ -36,5 +36,18 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
+# System Media Transport Controls (C++/WinRT from the Windows SDK). Built as a
+# separate target: WinRT headers need exceptions and do not build under the
+# runner's /W4 /WX and _HAS_EXCEPTIONS=0.
+add_library(dymuse_system_media STATIC "system_media.cpp")
+target_compile_features(dymuse_system_media PRIVATE cxx_std_17)
+target_compile_options(dymuse_system_media PRIVATE /EHsc /utf-8 /W3 /permissive-)
+target_compile_definitions(dymuse_system_media PRIVATE "NOMINMAX" "WIN32_LEAN_AND_MEAN")
+target_link_libraries(dymuse_system_media PRIVATE "windowsapp.lib")
+# Keep the .lib out of the app bundle directory (runner/<Config>).
+set_target_properties(dymuse_system_media PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/system_media")
+target_link_libraries(${BINARY_NAME} PRIVATE dymuse_system_media)
+
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

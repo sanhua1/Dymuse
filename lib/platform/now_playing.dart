@@ -5,7 +5,8 @@ import '../playback/audio_engine.dart';
 import '../playback/playback_controller.dart';
 
 /// 系统“正在播放”与媒体键：Apple 端为 MPNowPlayingInfoCenter 与
-/// MPRemoteCommandCenter，Android 端为前台服务里的 MediaSession 与媒体通知。
+/// MPRemoteCommandCenter，Android 端为前台服务里的 MediaSession 与媒体通知，
+/// Windows 端为 SystemMediaTransportControls（媒体浮窗、媒体键、锁屏）。
 /// 所有系统命令都走同一 PlaybackController。
 class NowPlaying {
   NowPlaying(this.controller) {

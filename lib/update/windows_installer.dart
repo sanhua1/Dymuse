@@ -1,72 +1,28 @@
 import 'dart:io';
 
-/// Windows 绿色版的原地更新：解压新版到临时目录，等本进程退出后覆盖安装目录并重新启动。
-/// 只覆盖同名文件，不删除安装目录里的任何文件，也不碰用户数据（数据在 AppData）。
-/// 脚本和日志都放在系统临时目录；安装目录没有写权限（例如装在 Program Files）时会失败并
-/// 重新启动旧版本，原因写入日志。
-const _script = r'''
-param([int]$ProcId, [string]$Zip, [string]$Target, [string]$Exe, [string]$Log)
-$ErrorActionPreference = 'Stop'
-function Write-Log($message) {
-  Add-Content -LiteralPath $Log -Value ("{0} {1}" -f (Get-Date -Format o), $message) -Encoding UTF8
-}
-try {
-  $stage = Join-Path (Split-Path -Parent $Zip) 'stage'
-  Write-Log "extract $Zip"
-  Expand-Archive -LiteralPath $Zip -DestinationPath $stage -Force
-  $root = $stage
-  if (-not (Test-Path -LiteralPath (Join-Path $root 'dymuse.exe'))) {
-    $sub = Get-ChildItem -LiteralPath $stage -Directory |
-      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'dymuse.exe') } |
-      Select-Object -First 1
-    if (-not $sub) { throw 'dymuse.exe not found in package' }
-    $root = $sub.FullName
-  }
-  Write-Log "wait pid $ProcId"
-  $deadline = (Get-Date).AddSeconds(60)
-  while ((Get-Process -Id $ProcId -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {
-    Start-Sleep -Milliseconds 300
-  }
-  if (Get-Process -Id $ProcId -ErrorAction SilentlyContinue) { throw 'old process still running' }
-  Write-Log "copy $root -> $Target"
-  & robocopy $root $Target /E /IS /IT /R:5 /W:1 /NFL /NDL /NP | Out-Null
-  if ($LASTEXITCODE -ge 8) { throw "robocopy exit $LASTEXITCODE" }
-  Write-Log 'ok'
-} catch {
-  Write-Log ("failed: {0}" -f $_)
-}
-Start-Process -FilePath $Exe
-''';
+/// Windows 更新：静默运行新版安装包（Inno Setup，见 windows/installer/dymuse.iss），
+/// 装到当前程序所在目录。默认目录是 C:\Program Files\Dymuse；早先解压 zip 使用的绿色版
+/// 也会就地升级，此后同样出现在“应用和功能”里。
+///
+/// 安装包以普通权限启动，需要时自己申请管理员权限（系统会弹出 UAC 确认）；它会等本进程
+/// 退出（还没退出就关掉），覆盖文件，再以原用户身份重新启动 Dymuse。用户数据在 AppData，
+/// 不受影响。安装日志写在安装包旁边的 update.log。UAC 被拒绝时安装包直接退出，旧版不变，
+/// 需要用户自己重新打开 Dymuse。
+List<String> windowsSetupArguments(String installDir, String log) => [
+  '/SILENT',
+  '/SUPPRESSMSGBOXES',
+  '/NORESTART',
+  '/DIR=$installDir',
+  '/LOG=$log',
+];
 
-/// 启动更新脚本；调用方随后应让应用退出。
-Future<void> startWindowsUpdate(File zip) async {
-  final exe = Platform.resolvedExecutable;
-  final target = File(exe).parent.path;
-  final dir = zip.parent.path;
-  final script = File('$dir/apply_update.ps1');
-  await script.writeAsString(_script, flush: true);
+/// 启动安装包；调用方随后应让应用退出。
+Future<void> startWindowsUpdate(File setup) async {
+  final installDir = File(Platform.resolvedExecutable).parent.path;
   await Process.start(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-WindowStyle',
-      'Hidden',
-      '-File',
-      script.path,
-      '-ProcId',
-      '$pid',
-      '-Zip',
-      zip.path,
-      '-Target',
-      target,
-      '-Exe',
-      exe,
-      '-Log',
-      '$dir/update.log',
-    ], // 不能用 detached：Windows 上以 DETACHED_PROCESS 启动的 powershell.exe 不会运行脚本（实测）。
-    // normal 模式的子进程在本进程退出后会继续运行；脚本不输出任何内容，管道不会堵住。
-    mode: ProcessStartMode.normal,
+    setup.path,
+    windowsSetupArguments(installDir, '${setup.parent.path}\\update.log'),
+    // 安装包是图形程序，可以脱离本进程独立运行；本进程随后退出。
+    mode: ProcessStartMode.detached,
   );
 }

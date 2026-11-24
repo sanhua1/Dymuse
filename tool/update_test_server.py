@@ -1,6 +1,6 @@
 """本机更新联调用的假发布源（只监听 127.0.0.1）。
 
-用法：py -3 tool/update_test_server.py <端口> <zip 路径> [新版本号]
+用法：py -3 tool/update_test_server.py <端口> <安装包路径（zip 或 setup.exe）> [新版本号]
 应用用 --dart-define=DYMUSE_UPDATE_API=http://127.0.0.1:<端口>/api/latest 与
 DYMUSE_UPDATE_BASE=http://127.0.0.1:<端口>/dl 编译。安装包被下载过一次后，清单改回
 当前版本，避免更新后的应用反复提示。
@@ -14,7 +14,13 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 port = int(sys.argv[1])
 zip_path = sys.argv[2]
 new_version = sys.argv[3] if len(sys.argv) > 3 else '9.9.9'
-key, name = ('macos', 'Dymuse-macos.dmg') if os.environ.get('DYMUSE_TEST_PLATFORM') == 'macos' else ('windows-x64', 'Dymuse-windows-x64.zip')
+if os.environ.get('DYMUSE_TEST_PLATFORM') == 'macos':
+    key, name = 'macos', 'Dymuse-macos.dmg'
+elif zip_path.lower().endswith('.exe'):
+    # 0.2.8 起的 Windows 客户端用安装包更新。
+    key, name = 'windows-x64-setup', 'Dymuse-windows-x64-setup.exe'
+else:
+    key, name = 'windows-x64', 'Dymuse-windows-x64.zip'
 data = open(zip_path, 'rb').read()
 state = {'downloaded': False}
 tag = f'v{new_version}'

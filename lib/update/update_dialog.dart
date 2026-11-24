@@ -156,7 +156,9 @@ class _UpdateDialogState extends State<_UpdateDialog> {
         return;
       }
       setState(() {
-        _status = '校验通过，正在更新并重启…';
+        _status = Platform.isWindows
+            ? '校验通过，正在启动安装程序…\n系统询问时请允许，装完会自动重新打开。'
+            : '校验通过，正在更新并重启…';
         _progress = null;
       });
       if (Platform.isMacOS) {

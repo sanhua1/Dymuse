@@ -121,15 +121,19 @@ class UpdateService extends ChangeNotifier {
       : const [giteeSource, githubSource];
 
   static String platformKey() {
-    if (Platform.isWindows) return 'windows-x64';
+    // 0.2.8 起 Windows 用安装包更新；清单里的 `windows-x64`（zip）留给更早的客户端。
+    if (Platform.isWindows) return windowsSetupKey;
     if (Platform.isAndroid) return 'android-arm64';
     if (Platform.isMacOS) return 'macos';
     return 'ios';
   }
 
-  /// 本平台能否在应用内下载并安装（Windows、macOS 原地更新，Android 交给系统安装器）。
+  /// Windows 安装包（Inno Setup）在清单里的平台键。
+  static const windowsSetupKey = 'windows-x64-setup';
+
+  /// 本平台能否在应用内下载并安装（Windows 静默运行安装包、macOS 原地替换，Android 交给系统安装器）。
   bool get canInstall =>
-      (Platform.isWindows && platform == 'windows-x64') ||
+      (Platform.isWindows && platform == windowsSetupKey) ||
       (Platform.isAndroid && platform == 'android-arm64') ||
       (Platform.isMacOS && platform == 'macos');
 

@@ -5,6 +5,7 @@
 用法示例（在发布仓库根目录）：
   python3 tool/release.py --version 0.2.1 --build 3 --notes notes.md \
       --windows ~/release/Dymuse-windows-x64.zip \
+      --windows-setup ~/release/Dymuse-windows-x64-setup.exe \
       --android build/app/outputs/flutter-apk/app-release.apk
 默认只做“演练”：生成清单并打印将要上传的内容；加 --publish 才真正发布。
 Gitee 令牌从环境变量 GITEE_TOKEN 或 --gitee-token-file 读取，不会被打印。
@@ -27,8 +28,10 @@ GITEE_REPO = 'sanhua1/dymuserelease'
 GITHUB_REPO = 'sanhua1/Dymuse'
 
 # 清单里的平台键与客户端 UpdateService.platformKey 一致；文件名固定，下载地址才能由 tag 拼出。
+# Windows 有两份：0.2.8 起的客户端用安装包（windows-x64-setup），更早的客户端只认 zip（windows-x64）。
 PLATFORMS = {
     'windows': ('windows-x64', 'Dymuse-windows-x64.zip'),
+    'windows_setup': ('windows-x64-setup', 'Dymuse-windows-x64-setup.exe'),
     'android': ('android-arm64', 'Dymuse-android-arm64.apk'),
     'macos': ('macos', 'Dymuse-macos.dmg'),
 }
@@ -86,7 +89,7 @@ def main():
     parser.add_argument('--build', required=True, type=int)
     parser.add_argument('--notes', required=True, help='更新说明（Markdown/纯文本文件）')
     for key in PLATFORMS:
-        parser.add_argument(f'--{key}', help=f'{key} 安装包路径')
+        parser.add_argument(f'--{key.replace("_", "-")}', dest=key, help=f'{key} 安装包路径')
     parser.add_argument('--extra', action='append', default=[],
                         help='额外上传但不写进清单的文件（例如 iOS 未签名 IPA），可重复')
     parser.add_argument('--replace', action='store_true',
