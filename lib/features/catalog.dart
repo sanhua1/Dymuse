@@ -143,11 +143,187 @@ class Collection {
   final bool canSubscribe, subscribed;
 }
 
-/// 综合保留上游分块顺序，不把不同内容合成歌曲列表。
-class SearchBlock {
-  const SearchBlock(this.category, this.page);
-  final SearchCategory category;
+/// 分块页面的一块：综合搜索的各分类，或“现在就听”首页的各板块。
+/// 保留上游分块顺序，不把不同内容合成歌曲列表。
+class CatalogBlock {
+  const CatalogBlock(
+    this.category,
+    this.page, {
+    this.title,
+    this.more,
+    this.playAll = false,
+    this.limit,
+  });
+
+  /// 综合搜索的分类；首页板块为 null。
+  final SearchCategory? category;
   final CatalogPage page;
+  final String? title;
+
+  /// 首页板块的“查看更多”跳转目标。
+  final DiscoverSection? more;
+
+  /// 是否提供“播放全部”（按本块歌曲依序播放）。
+  final bool playAll;
+
+  /// 最多显示几项；null 时歌曲 5 首、合集 6 个。
+  final int? limit;
+
+  String get label => title ?? category?.label ?? '';
+
+  /// 把 homepage/block/page 的响应转成首页板块；只取能在本应用打开的类型
+  /// （推荐歌单、雷达歌单、风格推荐、新歌新碟），播客、黑胶专享等不显示。
+  static List<CatalogBlock> home(Json data) {
+    final blocks = <CatalogBlock>[];
+    final raw = data['data'] is Map ? (data['data'] as Map)['blocks'] : null;
+    if (raw is! List) return blocks;
+    String text(Object? element, String key) {
+      final value = element is Map ? element[key] : null;
+      return value is Map ? '${value['title'] ?? ''}'.trim() : '';
+    }
+
+    Iterable<(String, Map)> resources(Map block) sync* {
+      for (final creative in (block['creatives'] as List? ?? const [])) {
+        if (creative is! Map) continue;
+        for (final item in (creative['resources'] as List? ?? const [])) {
+          if (item is Map) yield ('${creative['creativeType'] ?? ''}', item);
+        }
+      }
+    }
+
+    String? image(Map item) {
+      final ui = item['uiElement'];
+      final image = ui is Map ? ui['image'] : null;
+      final url = image is Map ? image['imageUrl'] : null;
+      return url is String && url.isNotEmpty ? url : null;
+    }
+
+    Track? song(Map item) {
+      final ext = item['resourceExtInfo'];
+      final data = ext is Map ? ext['songData'] ?? ext['song'] : null;
+      if (data is! Map || data['id'] == null) return null;
+      final song = Map<String, dynamic>.from(data);
+      final album = song['album'] ?? song['al'];
+      final cover = image(item);
+      if (cover != null && (album is! Map || album['picUrl'] == null)) {
+        song['album'] = {
+          ...?(album as Map?)?.cast<String, dynamic>(),
+          'picUrl': cover,
+        };
+        song.remove('al');
+      }
+      return Track.netease(song);
+    }
+
+    String names(Map item) {
+      final ext = item['resourceExtInfo'];
+      final artists = ext is Map ? ext['artists'] : null;
+      return artists is List
+          ? artists
+                .whereType<Map>()
+                .map((a) => '${a['name'] ?? ''}')
+                .where((n) => n.isNotEmpty)
+                .join(' / ')
+          : '';
+    }
+
+    Collection playlist(Map item, {required bool radar}) {
+      final ui = item['uiElement'];
+      var title = text(ui, 'mainTitle');
+      var subtitle = '';
+      // 雷达歌单的标题形如“还在听《九万字》吗|时光雷达”：竖线后是歌单名，前面是推荐理由。
+      final bar = title.lastIndexOf('|');
+      if (radar && bar > 0 && bar < title.length - 1) {
+        subtitle = title.substring(0, bar).trim();
+        title = title.substring(bar + 1).trim();
+      } else if (ui is Map && ui['labelTexts'] is List) {
+        subtitle = (ui['labelTexts'] as List).take(3).join(' · ');
+      }
+      return Collection(
+        '${item['resourceId']}',
+        title.isEmpty ? '未命名歌单' : title,
+        subtitle,
+        image(item),
+        'playlist',
+      );
+    }
+
+    for (final block in raw.whereType<Map>()) {
+      final code = '${block['blockCode'] ?? ''}';
+      final title = text(block['uiElement'], 'subTitle');
+      final items = resources(block).toList();
+      switch (code) {
+        case 'HOMEPAGE_BLOCK_PLAYLIST_RCMD':
+        case 'HOMEPAGE_BLOCK_MGC_PLAYLIST':
+          final radar = code == 'HOMEPAGE_BLOCK_MGC_PLAYLIST';
+          final lists = [
+            for (final (_, item) in items)
+              if (item['resourceType'] == 'list' && item['resourceId'] != null)
+                playlist(item, radar: radar),
+          ];
+          if (lists.isEmpty) continue;
+          blocks.add(
+            CatalogBlock(
+              null,
+              CatalogPage(collections: lists, total: lists.length),
+              title: title.isNotEmpty ? title : (radar ? '雷达歌单' : '推荐歌单'),
+              more: radar ? null : DiscoverSection.playlists,
+              limit: 12,
+            ),
+          );
+        case 'HOMEPAGE_BLOCK_STYLE_RCMD':
+          final tracks = [
+            for (final (_, item) in items)
+              if (item['resourceType'] == 'song') ?song(item),
+          ];
+          if (tracks.isEmpty) continue;
+          blocks.add(
+            CatalogBlock(
+              null,
+              CatalogPage(tracks: tracks, total: tracks.length),
+              title: title.isNotEmpty ? title : '风格推荐',
+              playAll: true,
+              limit: 12,
+            ),
+          );
+        case 'HOMEPAGE_BLOCK_NEW_ALBUM_NEW_SONG':
+          // 数字专辑需要单独购买，不放进来。
+          final tracks = [
+            for (final (type, item) in items)
+              if (type == 'NEW_SONG_HOMEPAGE' && item['resourceType'] == 'song')
+                ?song(item),
+          ];
+          final albums = [
+            for (final (type, item) in items)
+              if (type == 'NEW_ALBUM_HOMEPAGE' &&
+                  item['resourceType'] == 'album' &&
+                  item['resourceId'] != null)
+                Collection(
+                  '${item['resourceId']}',
+                  text(item['uiElement'], 'mainTitle'),
+                  names(item),
+                  image(item),
+                  'album',
+                ),
+          ];
+          if (tracks.isEmpty && albums.isEmpty) continue;
+          blocks.add(
+            CatalogBlock(
+              null,
+              CatalogPage(
+                tracks: tracks,
+                collections: albums,
+                total: tracks.length + albums.length,
+              ),
+              title: title.isNotEmpty ? title : '新歌新碟',
+              playAll: tracks.isNotEmpty,
+              limit: 12,
+            ),
+          );
+      }
+    }
+    return blocks;
+  }
 }
 
 class CatalogPage {
@@ -164,7 +340,7 @@ class CatalogPage {
   final int total;
   final int? nextOffset;
   final Collection? source;
-  final List<SearchBlock> blocks;
+  final List<CatalogBlock> blocks;
 }
 
 /// 页面查询与播放队列分开，分页只影响浏览。
@@ -312,7 +488,7 @@ class Catalog extends ChangeNotifier {
       'album': SearchCategory.albums,
       'artist': SearchCategory.artists,
     };
-    final sections = <SearchBlock>[];
+    final sections = <CatalogBlock>[];
     final seen = <SearchCategory>{};
     final Iterable<dynamic> order = result['order'] is List
         ? result['order'] as List
@@ -328,7 +504,7 @@ class Catalog extends ChangeNotifier {
       );
       if (page.tracks.isEmpty && page.collections.isEmpty) continue;
       remember(page.tracks, session);
-      sections.add(SearchBlock(kind, page));
+      sections.add(CatalogBlock(kind, page));
     }
     return CatalogPage(blocks: sections, total: sections.length);
   }
@@ -715,6 +891,9 @@ class Catalog extends ChangeNotifier {
     String playlistCategory = '全部',
     String playlistOrder = 'hot',
     bool searchSubscriptions = false,
+
+    /// “现在就听”首页请网易云换一批内容。
+    bool refresh = false,
   }) async {
     final session = api.token;
     if (mode == MusicMode.bilibili) {
@@ -914,6 +1093,27 @@ class Catalog extends ChangeNotifier {
           .toList();
       remember(tracks, session);
       return CatalogPage(tracks: tracks, total: tracks.length);
+    }
+    // 登录后“推荐”用官方首页板块；游客或首页没有可显示的板块时用每日推荐歌单。
+    if (section == 'discover' && !api.guest) {
+      try {
+        final data =
+            await api.get(
+                  '/netease/homepage',
+                  refresh ? {'refresh': true} : null,
+                )
+                as Json;
+        final blocks = CatalogBlock.home(data);
+        if (blocks.isNotEmpty) {
+          for (final block in blocks) {
+            remember(block.page.tracks, session);
+          }
+          return CatalogPage(blocks: blocks, total: blocks.length);
+        }
+      } on ApiException catch (error) {
+        // 缓存缺失或首页暂不可用时退回每日推荐歌单；登录失效照常报出。
+        if (error.status == 401) rethrow;
+      }
     }
     final personal = section == 'playlists';
     final data =

@@ -14,8 +14,11 @@ class ListeningReporter {
     engine.position.addListener(_positionChanged);
     engine.playing.addListener(_stateChanged);
     engine.buffering.addListener(_stateChanged);
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) {
-      unawaited(checkpoint());
+    // 后台（锁屏、最小化、菜单栏）引擎不再推送位置，只能主动读；这里定时取样，
+    // 否则后台收听整段都不计时（2026-11 实测：听完一首只记下前台的几秒）。
+    _timer = Timer.periodic(sampleInterval, (_) {
+      _positionChanged();
+      if (++_ticks % 5 == 0) unawaited(checkpoint());
     });
   }
   final ApiClient api;
@@ -27,6 +30,11 @@ class ListeningReporter {
   Json? _current;
   String? _owner, _session, _server;
   Timer? _timer;
+  int _ticks = 0;
+
+  /// 主动取样间隔；单次计时的最大间隔留出一倍余量。
+  static const sampleInterval = Duration(seconds: 2);
+  static const _maxGap = 5000;
   Future<void>? _sending;
   Future<void> _writes = Future.value();
   int _lastAt = 0, _lastPosition = 0;
@@ -127,7 +135,7 @@ class ListeningReporter {
     if (entry != null &&
         _eligible &&
         elapsed > 0 &&
-        elapsed <= 2500 &&
+        elapsed <= _maxGap &&
         delta > 0 &&
         delta <= elapsed + 500) {
       entry['listenedMs'] = min(

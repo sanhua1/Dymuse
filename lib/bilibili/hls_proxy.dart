@@ -5,6 +5,10 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
+import '../core/diag.dart';
+
 class HlsException implements Exception {
   const HlsException(this.message);
   final String message;
@@ -125,7 +129,15 @@ class BiliHlsProxy {
   final HttpServer _server;
   final HttpClient _client = HttpClient()
     ..connectionTimeout = const Duration(seconds: 10)
-    ..idleTimeout = const Duration(seconds: 30);
+    ..idleTimeout = const Duration(seconds: 15);
+
+  /// 等上游响应头的上限。
+  static const _headerTimeout = Duration(seconds: 10);
+
+  /// 传数据途中上游多久没有新数据就断开。连接在应用挂起或网络抖动时断了、却没收到断开信号，
+  /// 不设上限会一直等，AVPlayer 就一直缓冲；断开后 AVPlayer 会重新请求这个分片。
+  @visibleForTesting
+  static Duration stallTimeout = const Duration(seconds: 10);
   final Map<String, _Entry> _entries = {};
   int _counter = 0;
 
@@ -174,12 +186,13 @@ class BiliHlsProxy {
           )
           ..write(text);
       } else if (parts[1] == 'audio.m4s') {
-        await _forward(request, entry);
+        await _forward(request, entry, parts[0]);
         return;
       } else {
         request.response.statusCode = HttpStatus.notFound;
       }
-    } catch (_) {
+    } catch (e) {
+      Diag.log('bili proxy ${request.uri.path} failed: ${e.runtimeType} $e');
       request.response.statusCode = HttpStatus.badGateway;
     }
     await request.response.close();
@@ -210,13 +223,19 @@ class BiliHlsProxy {
     }
   }
 
-  Future<void> _forward(HttpRequest request, _Entry entry) async {
-    final req = await _client.getUrl(Uri.parse(entry.url));
+  /// 把分片请求转发给 B 站。失败、超时、慢请求写进诊断日志（正常的请求不记，避免刷屏）。
+  Future<void> _forward(HttpRequest request, _Entry entry, String token) async {
+    final range = request.headers.value(HttpHeaders.rangeHeader);
+    final watch = Stopwatch()..start();
+    var stage = 'connect', sent = 0, headerMs = 0;
+    HttpClientRequest? req;
     try {
+      req = await _client.getUrl(Uri.parse(entry.url));
       entry.headers.forEach(req.headers.set);
-      final range = request.headers.value(HttpHeaders.rangeHeader);
       if (range != null) req.headers.set(HttpHeaders.rangeHeader, range);
-      final res = await req.close().timeout(const Duration(seconds: 15));
+      stage = 'headers';
+      final res = await req.close().timeout(_headerTimeout);
+      headerMs = watch.elapsedMilliseconds;
       request.response.statusCode = res.statusCode;
       for (final name in const [
         HttpHeaders.contentRangeHeader,
@@ -227,15 +246,48 @@ class BiliHlsProxy {
         if (value != null) request.response.headers.set(name, value);
       }
       request.response.headers.contentType = ContentType('audio', 'mp4');
-      await request.response.addStream(res);
+      if (res.statusCode != 200 && res.statusCode != 206) {
+        Diag.log(
+          'bili proxy upstream HTTP ${res.statusCode} token=$token range=$range',
+        );
+      }
+      stage = 'body';
+      await request.response.addStream(
+        res
+            .timeout(
+              stallTimeout,
+              onTimeout: (sink) {
+                sink.addError(
+                  TimeoutException('no data for ${stallTimeout.inSeconds}s'),
+                );
+                sink.close();
+              },
+            )
+            .map((chunk) {
+              sent += chunk.length;
+              return chunk;
+            }),
+      );
       await request.response.close();
-    } catch (_) {
+      if (headerMs > 3000 || watch.elapsedMilliseconds > 8000) {
+        Diag.log(
+          'bili proxy slow token=$token range=$range headers=${headerMs}ms '
+          'total=${watch.elapsedMilliseconds}ms bytes=$sent',
+        );
+      }
+    } catch (e) {
+      Diag.log(
+        'bili proxy failed token=$token range=$range stage=$stage '
+        'after=${watch.elapsedMilliseconds}ms bytes=$sent: ${e.runtimeType} $e',
+      );
       try {
-        request.response.statusCode = HttpStatus.badGateway;
+        if (stage != 'body') {
+          request.response.statusCode = HttpStatus.badGateway;
+        }
         await request.response.close();
       } catch (_) {}
     } finally {
-      req.abort();
+      req?.abort();
     }
   }
 

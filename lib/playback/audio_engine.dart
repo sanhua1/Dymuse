@@ -325,26 +325,41 @@ class JustAudioEngine with WidgetsBindingObserver implements AudioEngine {
   @override
   Future<void> toggle() async {
     _lastCommand = DateTime.now();
-    if (_player.playing) return _player.pause();
+    if (_player.playing) return _bounded('pause', _player.pause());
     unawaited(_player.play());
   }
+
+  /// 跳转、停止、暂停最多等 [commandTimeout]。播放器卡在缓冲里时，AVPlayer 的跳转可能
+  /// 一直不回调；播放控制的命令是排队执行的，一条不返回，后面的切歌、重新装载全都轮不到，
+  /// 只能重启应用（2026-11-28 日志：卡住后按“上一首”跳回 0 秒，之后“下一首”再无反应）。
+  /// 超时只是不再等待，原操作仍在播放器里继续。
+  @visibleForTesting
+  static Duration commandTimeout = const Duration(seconds: 5);
+
+  Future<void> _bounded(String name, Future<void> action) => action.timeout(
+    commandTimeout,
+    onTimeout: () => Diag.log(
+      'audio $name timed out after ${commandTimeout.inSeconds}s '
+      'state=${_player.processingState.name} pos=${_player.position.inSeconds}s',
+    ),
+  );
 
   @override
   Future<void> pause() {
     _lastCommand = DateTime.now();
-    return _player.pause();
+    return _bounded('pause', _player.pause());
   }
 
   @override
   Future<void> stop() {
     _lastCommand = DateTime.now();
-    return _player.stop();
+    return _bounded('stop', _player.stop());
   }
 
   @override
   Future<void> seek(Duration value) {
     Diag.log('audio seek to=${value.inSeconds}s');
-    return _player.seek(value);
+    return _bounded('seek', _player.seek(value));
   }
 
   @override

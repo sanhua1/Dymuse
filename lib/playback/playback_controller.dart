@@ -32,6 +32,8 @@ class PlaybackController extends ChangeNotifier {
       }),
     );
     engine.buffering.addListener(_watchStall);
+    engine.buffering.addListener(_watchLongStall);
+    engine.playing.addListener(_watchLongStall);
     _timer = Timer.periodic(const Duration(seconds: 10), (_) {
       // 已经正常播了一段，说明连播恢复了，之后的失败重新计数。
       if (engine.playing.value &&
@@ -105,6 +107,14 @@ class PlaybackController extends ChangeNotifier {
   static const _stallWindow = Duration(seconds: 3);
   static const _stallCount = 5;
   static const _maxStallRecoveries = 2;
+
+  /// 长时间卡在缓冲：要播放、却连续缓冲超过 [longStallAfter] 没出来。连接在后台或网络抖动时
+  /// 断了、播放器又没收到错误时就会这样（2026-11-28 iPhone 日志：B 站歌曲暂停后继续、后台
+  /// 播放中途，各卡 28 秒到数分钟）。按卡顿处理：在当前位置重新取链装载，与 [_watchStall]
+  /// 共用同一首的恢复次数。
+  Timer? _longStall;
+  @visibleForTesting
+  static Duration longStallAfter = const Duration(seconds: 12);
 
   /// 已安排重试或跳过、新音源还没开始装载；这期间到达的错误属于刚失败的那次装载，忽略。
   bool _recovering = false;
@@ -942,15 +952,50 @@ class PlaybackController extends ChangeNotifier {
     _stallMarks.add(now);
     if (_stallMarks.length < _stallCount) return;
     _stallMarks.clear();
+    _recoverStall('stall', position, '同一位置反复缓冲');
+  }
+
+  bool get _stalling =>
+      engine.buffering.value &&
+      engine.playing.value &&
+      !loading &&
+      !_changing &&
+      current != null;
+
+  /// 要播放且在缓冲时开始计时，出了缓冲、暂停、切歌就取消；到时仍在缓冲就重新装载。
+  void _watchLongStall() {
+    if (!_stalling) {
+      _longStall?.cancel();
+      _longStall = null;
+      return;
+    }
+    _longStall ??= Timer(longStallAfter, () {
+      _longStall = null;
+      if (_disposed || !_stalling) return;
+      _recoverStall(
+        'long stall ${longStallAfter.inSeconds}s',
+        engine.position.value,
+        '长时间缓冲',
+      );
+    });
+  }
+
+  /// 卡顿恢复：同一首最多 [_maxStallRecoveries] 次在当前位置重新取链装载，仍卡住就暂停并报错。
+  void _recoverStall(String reason, Duration position, String detail) {
+    if (_stallTrack != current!.id) {
+      _stallTrack = current!.id;
+      _stallRecoveries = 0;
+      _stallMarks.clear();
+    }
     if (_stallRecoveries >= _maxStallRecoveries) {
-      Diag.log('stall persists id=${current?.id} pos=${position.inSeconds}s');
+      Diag.log('$reason persists id=${current?.id} pos=${position.inSeconds}s');
       unawaited(engine.pause());
-      _showError('同一位置反复缓冲');
+      _showError(detail);
       return;
     }
     _stallRecoveries++;
     Diag.log(
-      'stall detected id=${current?.id} pos=${position.inSeconds}s, '
+      '$reason detected id=${current?.id} pos=${position.inSeconds}s, '
       'reloading ($_stallRecoveries/$_maxStallRecoveries)',
     );
     unawaited(_reload());
@@ -1173,6 +1218,9 @@ class PlaybackController extends ChangeNotifier {
     ++_intent;
     _timer?.cancel();
     engine.buffering.removeListener(_watchStall);
+    engine.buffering.removeListener(_watchLongStall);
+    engine.playing.removeListener(_watchLongStall);
+    _longStall?.cancel();
     listening.dispose();
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());

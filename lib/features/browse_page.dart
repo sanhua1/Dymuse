@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' show SelectionArea;
 import 'package:flutter/services.dart';
 import '../core/api_client.dart';
 import '../design_system/components.dart';
+import '../design_system/shelf.dart';
 import '../design_system/tokens.dart';
 import '../playback/playback_controller.dart';
 import '../platform/desktop_window.dart';
@@ -299,6 +300,14 @@ class BrowseState extends ChangeNotifier {
 
   Future<void> retry() => load(more: _retryMore);
 
+  /// 页眉“刷新”：现在就听首页请网易云换一批，其他页面与重新载入相同。
+  Future<void> refresh() {
+    _refreshHome = true;
+    return load();
+  }
+
+  bool _refreshHome = false;
+
   /// 游客打开“我喜欢 / 我的歌单 / 播客”这类依赖网易云账号的页面：不请求，显示登录提示。
   bool get needsLogin =>
       catalog.api.guest &&
@@ -325,6 +334,8 @@ class BrowseState extends ChangeNotifier {
     _retryMore = more;
     notifyListeners();
     var cached = false;
+    final refresh = _refreshHome && !more;
+    _refreshHome = false;
     try {
       final offset = more ? page.nextOffset! : 0;
       Future<CatalogPage> fetch() => catalog.browse(
@@ -339,9 +350,11 @@ class BrowseState extends ChangeNotifier {
         discovery: discovery,
         playlistCategory: playlistCategory,
         playlistOrder: playlistOrder,
+        refresh: refresh,
       );
       // 首屏先用磁盘上的请求缓存立即显示，再从网络刷新；网络失败时保留缓存内容。
-      if (!more) {
+      // 主动换一批时不先显示缓存，免得旧内容一闪而过。
+      if (!more && !refresh) {
         try {
           final saved = await runZoned(fetch, zoneValues: {cacheOnly: true});
           if (_disposed || ticket != _ticket) return;
@@ -541,7 +554,7 @@ class BrowsePage extends StatelessWidget {
                         ActionButton(
                           label: '刷新',
                           icon: CupertinoIcons.arrow_clockwise,
-                          onPressed: browser.loading ? null : browser.load,
+                          onPressed: browser.loading ? null : browser.refresh,
                         ),
                       ],
                     ),
@@ -860,18 +873,43 @@ class BrowsePage extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          block.category.label,
+                          block.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                      ActionButton(
-                        label: '查看全部${block.category.label}',
-                        onPressed: () => browser.selectSearch(block.category),
-                        child: const Text('查看全部'),
-                      ),
+                      if (block.playAll && block.page.tracks.isNotEmpty) ...[
+                        ActionButton(
+                          label: '播放全部${block.label}',
+                          onPressed: () => _playBlock(block),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(CupertinoIcons.play_fill, size: 13),
+                              SizedBox(width: 6),
+                              Text('播放全部'),
+                            ],
+                          ),
+                        ),
+                        if (block.category != null || block.more != null)
+                          const SizedBox(width: 8),
+                      ],
+                      if (block.category case final category?)
+                        ActionButton(
+                          label: '查看全部${block.label}',
+                          onPressed: () => browser.selectSearch(category),
+                          child: const Text('查看全部'),
+                        )
+                      else if (block.more case final target?)
+                        ActionButton(
+                          label: '查看更多${block.label}',
+                          onPressed: () => browser.selectDiscovery(target),
+                          child: const Text('查看更多'),
+                        ),
                     ],
                   ),
                 ),
@@ -880,7 +918,10 @@ class BrowsePage extends StatelessWidget {
                 SliverPadding(
                   padding: EdgeInsets.symmetric(horizontal: rowInset),
                   sliver: SliverList.builder(
-                    itemCount: block.page.tracks.length.clamp(0, 5),
+                    itemCount: block.page.tracks.length.clamp(
+                      0,
+                      block.limit ?? 5,
+                    ),
                     itemBuilder: (_, index) => TrackRow(
                       track: block.page.tracks[index],
                       index: index,
@@ -894,25 +935,27 @@ class BrowsePage extends StatelessWidget {
                     ),
                   ),
                 ),
-              if (block.page.collections.isNotEmpty)
+              // 歌曲列表末行紧贴下一块标题；横排卡片自带文字下方的余量，不再加。
+              if (block.page.tracks.isNotEmpty)
                 SliverToBoxAdapter(
                   child: SizedBox(
+                    height: block.page.collections.isEmpty ? 36 : 20,
+                  ),
+                ),
+              if (block.page.collections.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: HorizontalShelf(
                     height:
                         260 +
                         (MediaQuery.textScalerOf(context).scale(14) - 14) * 3,
-                    child: ListView.separated(
-                      padding: EdgeInsets.symmetric(horizontal: g),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: block.page.collections.length.clamp(0, 6),
-                      separatorBuilder: (_, _) => const SizedBox(width: 20),
-                      itemBuilder: (_, index) => SizedBox(
-                        width: 170,
-                        child: _collection(
-                          context,
-                          block.page.collections[index],
-                        ),
-                      ),
+                    itemWidth: 170,
+                    padding: g,
+                    itemCount: block.page.collections.length.clamp(
+                      0,
+                      block.limit ?? 6,
                     ),
+                    itemBuilder: (_, index) =>
+                        _collection(context, block.page.collections[index]),
                   ),
                 ),
             ],
@@ -990,6 +1033,18 @@ class BrowsePage extends StatelessWidget {
           ? null
           : browser.collection,
       list: searchList ? browser.page.tracks : null,
+    );
+  }
+
+  /// 首页板块的“播放全部”：按本块歌曲依序播放，不做推荐续推。
+  void _playBlock(CatalogBlock block) {
+    final tracks = block.page.tracks.where((t) => t.available).toList();
+    if (tracks.isEmpty) return;
+    playback.start(
+      tracks.first,
+      context: browser.queueContext,
+      collection: null,
+      list: tracks,
     );
   }
 

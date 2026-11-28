@@ -31,6 +31,7 @@ class NeteaseClient {
     this.onVipExpired,
     this.eapiHost = 'https://interfacepc.music.163.com',
     this.weapiHost = 'https://music.163.com',
+    this.feedbackHost = 'https://clientlog.music.163.com',
   }) : cookie = {...?cookie} {
     this.cookie.putIfAbsent('deviceId', () => _newDeviceId);
   }
@@ -46,7 +47,7 @@ class NeteaseClient {
   final Future<void> Function()? onVipExpired;
 
   /// 接口主机；只有测试会改。
-  final String eapiHost, weapiHost;
+  final String eapiHost, weapiHost, feedbackHost;
 
   /// 易盾反作弊令牌生成器（需要浏览器环境，由界面层提供）；没有时请求不带令牌。
   final Future<String> Function()? antiCheat;
@@ -59,6 +60,13 @@ class NeteaseClient {
     'os': 'pc',
     'appver': '3.1.17.204416',
     'osver': 'Microsoft-Windows-10-Professional-build-19045-64bit',
+    'channel': 'netease',
+  };
+  // 收听上报用的 Mac 客户端身份。
+  static const _feedbackOs = {
+    'os': 'osx',
+    'appver': '3.1.10.5100',
+    'osver': '15.5',
     'channel': 'netease',
   };
   // eapi 的 User-Agent 必须与上面 header 里的身份（Windows 电脑版 3.1.17）一致：
@@ -129,6 +137,9 @@ class NeteaseClient {
 
     /// 只读请求遇到 -460（网易云风控偶发拦截）时稍等后再试，最多再试 [_riskRetries] 次。
     bool retryRisk = false,
+
+    /// 只对这一次 eapi 请求改用另一台主机（收听上报走 clientlog）。
+    String? eapiHostOverride,
   }) async {
     for (var attempt = 0; ; attempt++) {
       final json = await _requestOnce(
@@ -137,6 +148,7 @@ class NeteaseClient {
         crypto: crypto,
         checkToken: checkToken,
         cookieOverride: cookieOverride,
+        eapiHostOverride: eapiHostOverride,
       );
       final code = (json['code'] as num?)?.toInt();
       // 与 request.js 的 SPECIAL_STATUS_CODES 一致：这些业务码不算失败。
@@ -177,6 +189,7 @@ class NeteaseClient {
     required Crypto crypto,
     required bool checkToken,
     Map<String, String>? cookieOverride,
+    String? eapiHostOverride,
   }) async {
     final token = checkToken ? await antiCheat?.call() ?? '' : '';
     final c = _processed(crypto, cookieOverride ?? cookie);
@@ -210,7 +223,9 @@ class NeteaseClient {
         if (c['NMTID'] != null) 'NMTID': c['NMTID']!,
         if (checkToken && token.isNotEmpty) 'X-antiCheatToken': token,
       };
-      url = Uri.parse('$eapiHost/eapi/${uri.substring(5)}');
+      url = Uri.parse(
+        '${eapiHostOverride ?? eapiHost}/eapi/${uri.substring(5)}',
+      );
       headers['User-Agent'] = _eapiUa;
       headers['Cookie'] = _join(header);
       body['header'] = header;
@@ -471,6 +486,14 @@ class NeteaseClient {
   Future<Map<String, dynamic>> recommendResource() =>
       request('/api/v1/discovery/recommend/resource', {}, crypto: Crypto.weapi);
 
+  /// 首页板块（与官方 App“发现”页同源）：推荐歌单、雷达歌单、风格推荐、新歌新碟等。
+  /// [refresh] 为真时请网易云换一批内容。
+  Future<Map<String, dynamic>> homepage({bool refresh = false}) => request(
+    '/api/homepage/block/page',
+    {'refresh': refresh, 'cursor': null},
+    crypto: Crypto.weapi,
+  );
+
   /// 推荐歌单（公开接口，不登录也能用）；游客的“推荐”页用它代替需要账号的个性化推荐。
   /// 返回与 [recommendResource] 相同的形状：`{code, recommend: [{id, name, picUrl, trackCount}]}`。
   Future<Map<String, dynamic>> personalizedPlaylists({int limit = 30}) async {
@@ -696,11 +719,19 @@ class NeteaseClient {
         'end': completed ? 'playend' : 'interrupt',
       },
     };
-    await request('/api/feedback/weblog', {
-      'logs': jsonEncode([
-        {'action': action, 'json': json},
-      ]),
-    }, crypto: Crypto.weapi);
+    // 2026-11 实测：weapi → music.163.com 与 PC 身份的 eapi 都回 success 却不入账；
+    // 只有 Mac 客户端身份的 eapi 发到 clientlog 才进“最近播放”（与 api-enhanced 4.35.2 一致）。
+    // 只换这一次请求的身份，Set-Cookie 不写回会话。
+    await request(
+      '/api/feedback/weblog',
+      {
+        'logs': jsonEncode([
+          {'action': action, 'json': json},
+        ]),
+      },
+      cookieOverride: {...cookie, ..._feedbackOs},
+      eapiHostOverride: feedbackHost,
+    );
   }
 
   void close() => _http.close(force: true);

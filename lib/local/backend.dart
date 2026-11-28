@@ -181,6 +181,10 @@ class LocalBackend {
           return {'playlist': await _likedPlaylist()};
         }
         break;
+      case 'homepage':
+        return client.homepage(
+          refresh: input['refresh'] == true || input['refresh'] == 'true',
+        );
       case 'likelist':
         return client.likelist((profile?['userId'] ?? '').toString());
       case 'like':

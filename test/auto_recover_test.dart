@@ -197,6 +197,66 @@ void main() {
     expect(controller.error, isNull);
   });
 
+  group('长时间卡在缓冲', () {
+    setUp(
+      () =>
+          PlaybackController.longStallAfter = const Duration(milliseconds: 300),
+    );
+    tearDown(
+      () => PlaybackController.longStallAfter = const Duration(seconds: 12),
+    );
+
+    test('要播放却一直缓冲：在当前位置重新装载，同一首最多两次，仍卡住就暂停报错', () async {
+      final engine = _Engine();
+      final controller = _controller(engine);
+      await controller.select(0);
+      engine.position.value = const Duration(seconds: 108);
+      Future<void> stuck() async {
+        engine.buffering.value = false;
+        engine.buffering.value = true;
+        await _settle();
+      }
+
+      await stuck();
+      expect(engine.opened, ['1', '1']);
+      expect(engine.offsets.last, const Duration(seconds: 108));
+      expect(controller.error, isNull);
+      await stuck();
+      expect(engine.opened, ['1', '1', '1']);
+      await stuck();
+      expect(engine.opened, ['1', '1', '1']);
+      expect(engine.playing.value, isFalse);
+      expect(controller.error, contains('长时间缓冲'));
+    });
+
+    test('暂停时缓冲不处理；按播放后仍卡住才重新装载', () async {
+      final engine = _Engine();
+      final controller = _controller(engine);
+      await controller.select(0);
+      engine.position.value = const Duration(seconds: 31);
+      engine.playing.value = false;
+      engine.buffering.value = true;
+      await _settle();
+      expect(engine.opened, ['1']);
+      engine.playing.value = true;
+      await _settle();
+      expect(engine.opened, ['1', '1']);
+      expect(engine.offsets.last, const Duration(seconds: 31));
+    });
+
+    test('缓冲在时限内结束：不重新装载', () async {
+      final engine = _Engine();
+      final controller = _controller(engine);
+      await controller.select(0);
+      engine.buffering.value = true;
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      engine.buffering.value = false;
+      await _settle();
+      expect(engine.opened, ['1']);
+      expect(controller.error, isNull);
+    });
+  });
+
   test('自动连播切歌装载中按“正要播放”上报，装载完结束', () async {
     final engine = _Engine();
     final controller = _controller(engine);
